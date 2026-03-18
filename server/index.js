@@ -1,42 +1,64 @@
 /* eslint-env node */
-const express = require('express');
-const cors = require('cors');
-const Parser = require('web-tree-sitter');
+// eslint-disable-next-line no-undef
+require('dotenv').config();
+import express, { json } from 'express';
+import { get } from 'axios';
+import cors from 'cors';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(json());
 
-async function startGitPulse() {
-  await Parser.init();
-  const parser = new Parser();
-  
-  // Note: For a full implementation, you would load a .wasm language file here
-  // const Lang = await Parser.Language.load('tree-sitter-javascript.wasm');
-  // parser.setLanguage(Lang);
+const GITHUB_API_BASE = "https://api.github.com";
+// eslint-disable-next-line no-undef
+const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}` };
 
-  app.post('/api/analyze', (req, res) => {
-    const { previousCommit, currentCommit } = req.body;
+// Helper to extract owner and repo name from a URL
+const parseGithubUrl = (url) => {
+  const parts = url.replace('https://github.com/', '').split('/');
+  return { owner: parts[0], repo: parts[1] };
+};
 
-    // The 'parser' is now utilized to analyze code structure [cite: 15, 19]
-    // In this MVP stage, we use character/node density as a proxy for CST nodes
-    const nA = previousCommit ? previousCommit.length : 0; 
-    const nB = currentCommit ? currentCommit.length : 0;
-    
-    // Calculate the 'Tree Edit Distance' (TED) proxy [cite: 22, 23]
-    const distance = Math.abs(nB - nA);
-    
-    // Reward Score formula: r = 1 - (tree_distance / total_nodes) [cite: 27, 28, 30]
-    const r = nB > 0 ? (1 - (distance / nB)) : 1;
+/**
+ * Fetches the 'Verifiable Technical History' [cite: 7]
+ */
+app.post('/api/link-repo', async (req, res) => {
+  const { url } = req.body;
+  const { owner, repo } = parseGithubUrl(url);
+
+  try {
+    // 1. Fetch Commit History Metadata [cite: 11]
+    const commitsResponse = await get(
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`, 
+      { headers }
+    );
+
+    // 2. Fetch Detailed 'Hunks' for the latest commit [cite: 26]
+    // This allows us to see the specific lines added/removed
+    const latestCommitSha = commitsResponse.data[0].sha;
+    const detailResponse = await get(
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${latestCommitSha}`,
+      { headers }
+    );
+
+    const historyData = commitsResponse.data.slice(0, 5).map(c => ({
+      sha: c.sha.substring(0, 7),
+      message: c.commit.message,
+      author: c.commit.author.name,
+      date: c.commit.author.date
+    }));
 
     res.json({
-      score: parseFloat(r.toFixed(2)),
-      // Low scores (< 0.4) indicate 'unnatural' evolution typical of AI 
-      status: r < 0.4 ? 'Suspect' : 'Authentic' 
+      success: true,
+      repoInfo: { owner, repo },
+      commits: historyData,
+      latestDiff: detailResponse.data.files[0]?.patch // The raw 'hunk' for analysis [cite: 26]
     });
-  });
 
-  app.listen(5000, () => console.log('Git-Pulse Engine running on port 5000'));
-}
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
-startGitPulse().catch(err => console.error("Engine failure:", err));
+// eslint-disable-next-line no-undef
+app.listen(process.env.PORT, () => console.log(`Git-Pulse Engine running on ${process.env.PORT}`));
