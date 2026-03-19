@@ -1,17 +1,18 @@
 /* eslint-env node */
-// eslint-disable-next-line no-undef
 require('dotenv').config();
-import express, { json } from 'express';
-import { get } from 'axios';
-import cors from 'cors';
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.use(json());
+app.use(express.json());
 
 const GITHUB_API_BASE = "https://api.github.com";
-// eslint-disable-next-line no-undef
-const headers = { Authorization: `token ${process.env.GITHUB_TOKEN}` };
+// Headers will securely use your token if it exists in the .env file
+const headers = process.env.GITHUB_TOKEN 
+  ? { Authorization: `token ${process.env.GITHUB_TOKEN}` } 
+  : {};
 
 // Helper to extract owner and repo name from a URL
 const parseGithubUrl = (url) => {
@@ -24,19 +25,19 @@ const parseGithubUrl = (url) => {
  */
 app.post('/api/link-repo', async (req, res) => {
   const { url } = req.body;
-  const { owner, repo } = parseGithubUrl(url);
-
+  
   try {
+    const { owner, repo } = parseGithubUrl(url);
+
     // 1. Fetch Commit History Metadata [cite: 11]
-    const commitsResponse = await get(
+    const commitsResponse = await axios.get(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`, 
       { headers }
     );
 
     // 2. Fetch Detailed 'Hunks' for the latest commit [cite: 26]
-    // This allows us to see the specific lines added/removed
     const latestCommitSha = commitsResponse.data[0].sha;
-    const detailResponse = await get(
+    const detailResponse = await axios.get(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${latestCommitSha}`,
       { headers }
     );
@@ -60,5 +61,5 @@ app.post('/api/link-repo', async (req, res) => {
   }
 });
 
-// eslint-disable-next-line no-undef
-app.listen(process.env.PORT, () => console.log(`Git-Pulse Engine running on ${process.env.PORT}`));
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Git-Pulse Engine running on port ${PORT}`));
