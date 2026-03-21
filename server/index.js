@@ -3,39 +3,58 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const { Parser, Language } = require('web-tree-sitter');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const GITHUB_API_BASE = "https://api.github.com";
-// Headers will securely use your token if it exists in the .env file
-const headers = process.env.GITHUB_TOKEN 
-  ? { Authorization: `token ${process.env.GITHUB_TOKEN}` } 
+const headers = process.env.GITHUB_TOKEN
+  ? { Authorization: `token ${process.env.GITHUB_TOKEN}` }
   : {};
 
-// Helper to extract owner and repo name from a URL
 const parseGithubUrl = (url) => {
   const parts = url.replace('https://github.com/', '').split('/');
   return { owner: parts[0], repo: parts[1] };
 };
 
+// 1. Global Parser Variable
+let parser = null;
+
+// 2. Initialize Parser exactly once on server startup
+async function initGitPulseParser() {
+  try {
+    await Parser.init();
+    parser = new Parser();
+
+    // Notice we use Language.load here instead of Parser.Language.load
+    const Lang = await Language.load('tree-sitter-javascript.wasm');
+    parser.setLanguage(Lang);
+
+    console.log("CST Parser successfully loaded WebAssembly grammar.");
+  } catch (err) {
+    console.error("Failed to load WASM grammar. Check file path.", err);
+  }
+}
+
 /**
  * Fetches the 'Verifiable Technical History' [cite: 7]
+ * and generates a Concrete Syntax Tree for semantic reasoning [cite: 19]
  */
 app.post('/api/link-repo', async (req, res) => {
   const { url } = req.body;
-  
+
   try {
     const { owner, repo } = parseGithubUrl(url);
 
-    // 1. Fetch Commit History Metadata [cite: 11]
+    // Fetch Commit History Metadata [cite: 11]
     const commitsResponse = await axios.get(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`, 
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`,
       { headers }
     );
 
-    // 2. Fetch Detailed 'Hunks' for the latest commit [cite: 26]
+    // Fetch Detailed 'Hunks' for the latest commit 
     const latestCommitSha = commitsResponse.data[0].sha;
     const detailResponse = await axios.get(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${latestCommitSha}`,
@@ -49,11 +68,28 @@ app.post('/api/link-repo', async (req, res) => {
       date: c.commit.author.date
     }));
 
+    // Extract the raw hunk
+    const rawHunk = detailResponse.data.files[0]?.patch || "";
+
+    // 3. Generate the CST dynamically from the GitHub diff
+    let totalNodes = 0;
+    let cstStructure = "No code patch found to parse.";
+
+    if (parser && rawHunk) {
+      const tree = parser.parse(rawHunk);
+      totalNodes = tree.rootNode.descendantCount;
+      cstStructure = tree.rootNode.toString(); // The LISP-like structure
+    }
+
     res.json({
       success: true,
       repoInfo: { owner, repo },
       commits: historyData,
-      latestDiff: detailResponse.data.files[0]?.patch // The raw 'hunk' for analysis [cite: 26]
+      latestDiff: rawHunk,
+      semanticData: {
+        nodeCount: totalNodes,
+        cst: cstStructure.substring(0, 500) + '...' // Truncated for the response
+      }
     });
 
   } catch (error) {
@@ -62,4 +98,9 @@ app.post('/api/link-repo', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Git-Pulse Engine running on port ${PORT}`));
+
+// 4. Start the server AND initialize the parser
+app.listen(PORT, async () => {
+  console.log(`Git-Pulse Engine running on port ${PORT}`);
+  await initGitPulseParser();
+});
