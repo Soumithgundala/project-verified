@@ -1,42 +1,96 @@
 import React, { useState } from 'react';
-import { Github, Shield, CheckCircle, AlertCircle } from 'lucide-react';
+import { Github, Shield, CheckCircle, Lock, Link as LinkIcon } from 'lucide-react';
 
 const GithubConnect = ({ onRepoLinked }) => {
   const [repoUrl, setRepoUrl] = useState('');
   const [isConsented, setIsConsented] = useState(false);
+  const [error, setError] = useState('');
 
   const handleLinkRepo = () => {
+    setError('');
+
     if (!isConsented) {
-      alert("Verification requires your consent for data processing under DPDPA 2023 guidelines.");
+      setError("Verification requires DPDPA 2023 consent.");
       return;
     }
-    if (repoUrl.includes('github.com')) {
+
+    if (repoUrl.toLowerCase().includes('github.com')) {
       onRepoLinked(repoUrl);
     } else {
-      alert("Please enter a valid GitHub URL.");
+      setError("Please enter a valid GitHub repository URL.");
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-20 p-8 bg-white rounded-2xl shadow-lg border border-gray-100">
-      <div className="flex items-center gap-3 mb-6">
-        <Github size={32} />
-        <h2 className="text-2xl font-bold">Connect Repository</h2>
+    <div className="connect-container">
+      {/* Header Section */}
+      <div className="connect-header">
+        <div className="icon-badge">
+          <Github size={32} strokeWidth={1.5} />
+        </div>
+        <h2 className="connect-title">Connect Repository</h2>
+        <p className="connect-subtitle">Link your project history to start the semantic integrity analysis.</p>
       </div>
-      <input
-        type="text"
-        placeholder="https://github.com/username/project"
-        className="w-full px-4 py-3 rounded-xl border mb-4 outline-none focus:ring-2 focus:ring-blue-500"
-        value={repoUrl}
-        onChange={(e) => setRepoUrl(e.target.value)}
-      />
-      <div className="flex items-start gap-2 mb-6">
-        <input type="checkbox" className="mt-1" checked={isConsented} onChange={(e) => setIsConsented(e.target.checked)} />
-        <span className="text-sm text-gray-600">I consent to Git history analysis for Graduation Outcome (GO) verification[cite: 3, 72].</span>
+
+      {/* Input Section */}
+      <div className="input-group">
+        <div className="input-wrapper">
+          <LinkIcon className="input-icon" size={18} />
+          <input
+            type="text"
+            placeholder="https://github.com/username/repo"
+            className={`custom-input ${error && !repoUrl.includes('github.com') ? 'input-error' : ''}`}
+            value={repoUrl}
+            onChange={(e) => {
+              setRepoUrl(e.target.value);
+              if (error) setError('');
+            }}
+          />
+        </div>
       </div>
-      <button onClick={handleLinkRepo} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700">
-        Link Project History
-      </button>
+
+      {/* Consent Section */}
+      <label className={`consent-box ${isConsented ? 'active' : ''}`}>
+        <div className="checkbox-wrapper">
+          <input
+            type="checkbox"
+            checked={isConsented}
+            onChange={(e) => {
+              setIsConsented(e.target.checked);
+              if (error) setError('');
+            }}
+          />
+          <div className="custom-checkbox">
+            {isConsented && <CheckCircle size={14} fill="currentColor" />}
+          </div>
+        </div>
+        <div className="consent-text">
+          <span className="consent-label">DPDPA 2023 Compliance</span>
+          <p>I consent to Git history analysis for Graduation Outcome validation.</p>
+        </div>
+      </label>
+
+      {/* Feedback & Action */}
+      <div className="action-area">
+        {error && (
+          <div className="error-message">
+            <Lock size={14} /> {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleLinkRepo}
+          className="connect-button"
+          disabled={!repoUrl}
+        >
+          Link Project History
+        </button>
+      </div>
+
+      <div className="security-footer">
+        <Shield size={12} />
+        <span>Encrypted end-to-end semantic processing</span>
+      </div>
     </div>
   );
 };
