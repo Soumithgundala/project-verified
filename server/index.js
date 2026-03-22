@@ -37,6 +37,30 @@ async function initGitPulseParser() {
     console.error("Failed to load WASM grammar. Check file path.", err);
   }
 }
+// Zhang sasha algo to check insertions, deletions and modifications
+/**
+ * Separates a Git Patch into 'Old' and 'New' code blocks
+ * removes +, -, and @@ headers for clean CST parsing
+ */
+function splitDiff(patch) {
+  const lines = patch.split('\n');
+  let oldCode = "";
+  let newCode = "";
+
+  lines.forEach(line => {
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      oldCode += line.substring(1) + '\n';
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      newCode += line.substring(1) + '\n';
+    } else if (!line.startsWith('@@')) {
+      // Keep context lines for both to maintain tree structure
+      oldCode += line + '\n';
+      newCode += line + '\n';
+    }
+  });
+
+  return { oldCode, newCode };
+}
 
 /**
  * Fetches the 'Verifiable Technical History' [cite: 7]
@@ -48,7 +72,7 @@ app.post('/api/link-repo', async (req, res) => {
   try {
     const { owner, repo } = parseGithubUrl(url);
 
-    // Fetch Commit History Metadata [cite: 11]
+    // Fetch Commit History Metadata
     const commitsResponse = await axios.get(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`,
       { headers }
@@ -68,28 +92,48 @@ app.post('/api/link-repo', async (req, res) => {
       date: c.commit.author.date
     }));
 
-    // Extract the raw hunk
     const rawHunk = detailResponse.data.files[0]?.patch || "";
 
-    // 3. Generate the CST dynamically from the GitHub diff
-    let totalNodes = 0;
-    let cstStructure = "No code patch found to parse.";
+    // Semantic Analysis Block
+    let analysis = {
+      oldNodeCount: 0,
+      newNodeCount: 0,
+      editDistance: 0,
+      rewardScore: 1,
+      status: "Authentic",
+      cst: ""
+    };
 
     if (parser && rawHunk) {
-      const tree = parser.parse(rawHunk);
-      totalNodes = tree.rootNode.descendantCount;
-      cstStructure = tree.rootNode.toString(); // The LISP-like structure
+      const { oldCode, newCode } = splitDiff(rawHunk);
+
+      const treeOld = parser.parse(oldCode);
+      const treeNew = parser.parse(newCode);
+
+      const n1 = treeOld.rootNode.descendantCount;
+      const n2 = treeNew.rootNode.descendantCount;
+
+      // Zhang-Shasha Proxy: Node-level Edit Distance
+      const d = Math.abs(n2 - n1);
+      const r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
+
+      analysis = {
+        oldNodeCount: n1,
+        newNodeCount: n2,
+        editDistance: d,
+        rewardScore: parseFloat(r.toFixed(2)),
+        status: r < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
+        cst: treeNew.rootNode.toString().substring(0, 500) + '...'
+      };
     }
 
+    // Single consolidated response
     res.json({
       success: true,
       repoInfo: { owner, repo },
       commits: historyData,
       latestDiff: rawHunk,
-      semanticData: {
-        nodeCount: totalNodes,
-        cst: cstStructure.substring(0, 500) + '...' // Truncated for the response
-      }
+      analysis: analysis
     });
 
   } catch (error) {
