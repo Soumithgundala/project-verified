@@ -13,6 +13,12 @@ function App() {
     setRepoLinked(true);
   };
 
+  // Callback to reset the app state to scan a new repository
+  const handleReset = () => {
+    setRepoLinked(false);
+    setRepoUrl('');
+  };
+
   return (
     <div className="app-shell">
       <nav className="navbar">
@@ -29,7 +35,12 @@ function App() {
             <GithubConnect onRepoLinked={handleConnectionSuccess} />
           ) : (
             // Step 2: Trigger Git-Pulse Semantic Analysis
-            <GitPulseMVP linkedUrl={repoUrl} />
+            // Note: Passed both linkedUrl (your original) and repoUrl (expected by the Bento Grid) to prevent any prop mismatches!
+            <GitPulseMVP
+              linkedUrl={repoUrl}
+              repoUrl={repoUrl}
+              onReset={handleReset}
+            />
           )}
         </div>
       </main>
