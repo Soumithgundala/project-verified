@@ -52,10 +52,15 @@ function splitDiff(patch) {
       oldCode += line.substring(1) + '\n';
     } else if (line.startsWith('+') && !line.startsWith('+++')) {
       newCode += line.substring(1) + '\n';
-    } else if (!line.startsWith('@@')) {
+    } else if (line.startsWith('\\') || line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
+      // Ignore patch headers and "\ No newline at end of file" comments
+      return;
+    } else {
       // Keep context lines for both to maintain tree structure
-      oldCode += line + '\n';
-      newCode += line + '\n';
+      // Stripping the leading space character if it is a diff context line
+      const contextLine = line.startsWith(' ') ? line.substring(1) : line;
+      oldCode += contextLine + '\n';
+      newCode += contextLine + '\n';
     }
   });
 
@@ -72,68 +77,107 @@ app.post('/api/link-repo', async (req, res) => {
   try {
     const { owner, repo } = parseGithubUrl(url);
 
-    // Fetch Commit History Metadata
+    // 1. Fetch the full commit history (up to 30 for performance)
     const commitsResponse = await axios.get(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits`,
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?per_page=30`,
       { headers }
     );
 
-    // Fetch Detailed 'Hunks' for the latest commit 
-    const latestCommitSha = commitsResponse.data[0].sha;
-    const detailResponse = await axios.get(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${latestCommitSha}`,
-      { headers }
-    );
+    const allCommits = commitsResponse.data;
 
-    const historyData = commitsResponse.data.slice(0, 5).map(c => ({
-      sha: c.sha.substring(0, 7),
-      message: c.commit.message,
-      author: c.commit.author.name,
-      date: c.commit.author.date
+    // 2. Map-Reduce: Process all commits in parallel for speed
+    const pulseDataResults = await Promise.all(allCommits.map(async (c) => {
+      try {
+        const detail = await axios.get(
+          `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${c.sha}`,
+          { headers }
+        );
+
+        // Filter for source code files only
+        const validExtensions = ['.js', '.jsx', '.ts', '.tsx'];
+        const sourceFile = detail.data.files.find(f =>
+          validExtensions.some(ext => f.filename?.endsWith(ext))
+        );
+
+        const rawHunk = sourceFile?.patch || "";
+        let n1 = 0, n2 = 0, d = 0, r = 1;
+        let cstStr = "No code patch found.";
+
+        if (parser && rawHunk) {
+          const { oldCode, newCode } = splitDiff(rawHunk);
+          const treeOld = parser.parse(oldCode);
+          const treeNew = parser.parse(newCode);
+          n1 = treeOld.rootNode.descendantCount;
+          n2 = treeNew.rootNode.descendantCount;
+          d = Math.abs(n2 - n1);
+          r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
+          cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+        }
+
+        return {
+          sha: c.sha.substring(0, 7),
+          score: parseFloat(r.toFixed(2)),
+          date: c.commit.author.date,
+          message: c.commit.message,
+          author: c.commit.author.name,
+          details: { n1, n2, d, cstStr }
+        };
+      } catch (err) {
+        return null; // Skip failed fetches
+      }
     }));
 
-    const rawHunk = detailResponse.data.files[0]?.patch || "";
-
-    // Semantic Analysis Block
-    let analysis = {
-      oldNodeCount: 0,
-      newNodeCount: 0,
-      editDistance: 0,
-      rewardScore: 1,
-      status: "Authentic",
-      cst: ""
+    // Clean up results and sort by date (Oldest -> Newest for the Graph)
+    const validResults = pulseDataResults.filter(r => r !== null);
+    const clusters = {
+      authentic: { label: "Steady Refactoring", color: "emerald", commits: [] },
+      standard: { label: "Active Development", color: "blue", commits: [] },
+      suspect: { label: "High-Velocity Dumps", color: "rose", commits: [] }
     };
 
-    if (parser && rawHunk) {
-      const { oldCode, newCode } = splitDiff(rawHunk);
+    validResults.forEach(item => {
+      if (item.score >= 0.85) {
+        clusters.authentic.commits.push(item);
+      } else if (item.score >= 0.45) {
+        clusters.standard.commits.push(item);
+      } else {
+        clusters.suspect.commits.push(item);
+      }
+    });
 
-      const treeOld = parser.parse(oldCode);
-      const treeNew = parser.parse(newCode);
+    const graphData = [...validResults].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      const n1 = treeOld.rootNode.descendantCount;
-      const n2 = treeNew.rootNode.descendantCount;
+    // Newest first for the History Log
+    const historyLog = [...validResults].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-      // Zhang-Shasha Proxy: Node-level Edit Distance
-      const d = Math.abs(n2 - n1);
-      const r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
-
-      analysis = {
-        oldNodeCount: n1,
-        newNodeCount: n2,
-        editDistance: d,
-        rewardScore: parseFloat(r.toFixed(2)),
-        status: r < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
-        cst: treeNew.rootNode.toString().substring(0, 500) + '...'
-      };
+    // Add fallback if repository had zero commits or zero valid source files
+    if (historyLog.length === 0) {
+      return res.json({
+        success: true,
+        repoInfo: { owner, repo },
+        commits: [],
+        pulseData: [],
+        analysis: { oldNodeCount: 0, newNodeCount: 0, editDistance: 0, rewardScore: 0, status: "Unknown", cst: "No valid data" },
+        clusters: clusters
+      });
     }
 
-    // Single consolidated response
+    const latest = historyLog[0];
+
     res.json({
       success: true,
       repoInfo: { owner, repo },
-      commits: historyData,
-      latestDiff: rawHunk,
-      analysis: analysis
+      commits: historyLog,
+      pulseData: graphData.map(g => ({ name: g.sha, score: g.score })),
+      analysis: {
+        oldNodeCount: latest.details.n1,
+        newNodeCount: latest.details.n2,
+        editDistance: latest.details.d,
+        rewardScore: latest.score,
+        status: latest.score < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
+        cst: latest.details.cstStr || "Full History Analyzed."
+      },
+      clusters: clusters
     });
 
   } catch (error) {
