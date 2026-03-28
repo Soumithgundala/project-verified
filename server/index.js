@@ -21,6 +21,19 @@ const parseGithubUrl = (url) => {
 
 // 1. Global Parser Variable
 let parser = null;
+const grammars = {
+  javascript: null,
+  python: null,
+  java: null,
+  c: null
+};
+
+const extensionMap = {
+  '.js': 'javascript', '.jsx': 'javascript', '.ts': 'javascript', '.tsx': 'javascript',
+  '.py': 'python',
+  '.java': 'java',
+  '.c': 'c', '.h': 'c'
+};
 
 // 2. Initialize Parser exactly once on server startup
 async function initGitPulseParser() {
@@ -28,14 +41,25 @@ async function initGitPulseParser() {
     await Parser.init();
     parser = new Parser();
 
-    // Notice we use Language.load here instead of Parser.Language.load
-    const Lang = await Language.load('tree-sitter-javascript.wasm');
-    parser.setLanguage(Lang);
+    // Load all the WASM files you placed in the root folder
+    grammars.javascript = await Language.load('tree-sitter-javascript.wasm');
+    grammars.python = await Language.load('tree-sitter-python.wasm');
+    grammars.java = await Language.load('tree-sitter-java.wasm');
+    grammars.c = await Language.load('tree-sitter-c.wasm');
 
-    console.log("CST Parser successfully loaded WebAssembly grammar.");
+    console.log("Polyglot Engine Active: JS, Python, Java, and C grammars loaded.");
   } catch (err) {
-    console.error("Failed to load WASM grammar. Check file path.", err);
+    console.error("Failed to load one or more WASM grammars. Check file paths.", err);
   }
+
+  // Notice we use Language.load here instead of Parser.Language.load
+  //   const Lang = await Language.load('tree-sitter-javascript.wasm');
+  //   parser.setLanguage(Lang);
+
+  //   console.log("CST Parser successfully loaded WebAssembly grammar.");
+  // } catch (err) {
+  //   console.error("Failed to load WASM grammar. Check file path.", err);
+  // }
 }
 // Zhang sasha algo to check insertions, deletions and modifications
 /**
@@ -103,15 +127,31 @@ app.post('/api/link-repo', async (req, res) => {
         let n1 = 0, n2 = 0, d = 0, r = 1;
         let cstStr = "No code patch found.";
 
-        if (parser && rawHunk) {
-          const { oldCode, newCode } = splitDiff(rawHunk);
-          const treeOld = parser.parse(oldCode);
-          const treeNew = parser.parse(newCode);
-          n1 = treeOld.rootNode.descendantCount;
-          n2 = treeNew.rootNode.descendantCount;
-          d = Math.abs(n2 - n1);
-          r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
-          cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+        if (parser && rawHunk && sourceFile) {
+          const fileExt = validExtensions.find(ext => sourceFile.filename.endsWith(ext));
+
+          // 2. Look up the language (e.g., 'python')
+          const langKey = extensionMap[fileExt];
+
+          // 3. Get the loaded WASM grammar
+          const targetGrammar = grammars[langKey];
+
+          if (targetGrammar) {
+            // 4. SWITCH THE PARSER'S BRAIN TO THE NEW LANGUAGE
+            parser.setLanguage(targetGrammar);
+
+            const { oldCode, newCode } = splitDiff(rawHunk);
+            const treeOld = parser.parse(oldCode);
+            const treeNew = parser.parse(newCode);
+            n1 = treeOld.rootNode.descendantCount;
+            n2 = treeNew.rootNode.descendantCount;
+            d = Math.abs(n2 - n1);
+            r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
+            cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+          }
+          else {
+            cstStr = `Grammar for ${langKey} not loaded on server.`;
+          }
         }
 
         return {

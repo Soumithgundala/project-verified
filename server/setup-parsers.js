@@ -1,46 +1,49 @@
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios'); // We use your existing Axios package!
 
 const parsers = [
     {
+        name: 'tree-sitter-javascript.wasm',
+        url: 'https://github.com/tree-sitter/tree-sitter-javascript/releases/latest/download/tree-sitter-javascript.wasm'
+    },
+    {
         name: 'tree-sitter-python.wasm',
-        url: 'https://unpkg.com/tree-sitter-wasms/out/tree-sitter-python.wasm'
+        url: 'https://github.com/tree-sitter/tree-sitter-python/releases/latest/download/tree-sitter-python.wasm'
     },
     {
         name: 'tree-sitter-java.wasm',
-        url: 'https://unpkg.com/tree-sitter-wasms/out/tree-sitter-java.wasm'
+        url: 'https://github.com/tree-sitter/tree-sitter-java/releases/latest/download/tree-sitter-java.wasm'
     },
     {
         name: 'tree-sitter-c.wasm',
-        url: 'https://unpkg.com/tree-sitter-wasms/out/tree-sitter-c.wasm'
+        url: 'https://github.com/tree-sitter/tree-sitter-c/releases/latest/download/tree-sitter-c.wasm'
     }
 ];
 
-console.log("Downloading Polyglot WebAssembly Parsers (Following Redirects)...");
+console.log("Downloading Official WebAssembly Parsers from GitHub...");
 
 async function downloadParsers() {
     for (const parser of parsers) {
         const filePath = path.join(__dirname, parser.name);
 
         try {
-            // Axios automatically follows 302 redirects!
-            const response = await axios({
-                method: 'GET',
-                url: parser.url,
-                responseType: 'stream' // We are downloading binary files
-            });
+            console.log(`Fetching ${parser.name}...`);
 
-            const writer = fs.createWriteStream(filePath);
-            response.data.pipe(writer);
+            // Native fetch automatically handles redirects and binary data safely
+            const response = await fetch(parser.url);
 
-            // Wait for the file to finish writing
-            await new Promise((resolve, reject) => {
-                writer.on('finish', resolve);
-                writer.on('error', reject);
-            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
 
-            console.log(`✅ Successfully downloaded: ${parser.name}`);
+            // Convert response directly into a clean binary buffer
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+
+            // Write synchronously to guarantee the file is saved properly
+            fs.writeFileSync(filePath, buffer);
+
+            console.log(`✅ Successfully downloaded: ${parser.name} (${(buffer.length / 1024).toFixed(2)} KB)`);
         } catch (err) {
             console.error(`❌ Error downloading ${parser.name}:`, err.message);
         }
