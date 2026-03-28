@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { Activity, ShieldCheck, CheckCircle, Terminal, GitCommit, Fingerprint, Layers, Cpu, ArrowLeft, Download } from 'lucide-react';
+import { Activity, ShieldCheck, CheckCircle, Terminal, GitCommit, Fingerprint, Layers, Cpu, ArrowLeft, Download, HelpCircle, X } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import './GitPulseMVP.css';
 
@@ -8,6 +8,7 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false); // NEW: Help Modal State
   const reportRef = useRef();
 
   useEffect(() => {
@@ -60,7 +61,7 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
   const isAuthentic = data?.analysis?.status === 'Authentic';
 
   return (
-    <div className="dashboard-wrapper">
+    <div className="dashboard-wrapper relative">
 
       {/* --- ALWAYS VISIBLE: NAVBAR --- */}
       <nav className="navbar" style={{ display: isPrinting ? 'none' : 'block' }}>
@@ -70,6 +71,11 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
             <h1>Project-<span>Verified</span></h1>
           </div>
           <div className="nav-actions">
+            {/* NEW: Guide Button */}
+            <button onClick={() => setShowHelpModal(true)} className="btn-secondary" style={{ marginRight: '10px' }}>
+              <HelpCircle size={16} /> Metrics Guide
+            </button>
+
             {data && !loading && (
               <button onClick={handleDownloadPDF} disabled={isPrinting} className="btn-primary">
                 {isPrinting ? <Activity className="animate-spin" size={16} /> : <Download size={16} />}
@@ -100,12 +106,10 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
 
           {/* =========================================================
               LAYOUT 1: THE WEB DASHBOARD 
-              This uses your custom CSS classes and is HIDDEN during PDF printing.
           ========================================================= */}
           <div className="report-container" style={{ display: isPrinting ? 'none' : 'block' }}>
             <div className="dashboard-grid">
 
-              {/* HERO METRIC */}
               <div className={`card hero-card ${isAuthentic ? 'authentic' : 'warning'}`}>
                 <div className="watermark"><Fingerprint size={150} /></div>
                 <p className="card-label"><ShieldCheck size={16} /> Integrity Score</p>
@@ -118,7 +122,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
                 </div>
               </div>
 
-              {/* PULSE GRAPH */}
               <div className="card graph-card">
                 <div className="card-header">
                   <h3>Evolution Pulse</h3>
@@ -143,7 +146,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
                 </div>
               </div>
 
-              {/* MINI STATS */}
               <div className="card mini-card">
                 <div><p className="mini-label">Old AST Nodes</p><p className="mini-value">{data.analysis.oldNodeCount}</p></div>
                 <div className="icon-box"><Layers size={24} /></div>
@@ -157,7 +159,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
                 <div className="icon-box"><Cpu size={24} /></div>
               </div>
 
-              {/* CLUSTERS */}
               {Object.entries(data.clusters).map(([key, group]) => (
                 <div key={key} className={`card cluster-card border-${key}`}>
                   <div className="cluster-header">
@@ -175,7 +176,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
                 </div>
               ))}
 
-              {/* HISTORY LOG */}
               <div className="card log-card">
                 <h3 className="card-title"><GitCommit size={20} /> Verified History Log</h3>
                 <div className="log-list scrollable">
@@ -194,7 +194,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
                 </div>
               </div>
 
-              {/* RAW OUTPUT */}
               <div className="card terminal-card">
                 <h3 className="terminal-title"><Terminal size={16} /> Raw CST Fragment</h3>
                 <div className="terminal-content scrollable">
@@ -208,11 +207,9 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
 
           {/* =========================================================
               LAYOUT 2: THE FORENSIC PDF TEMPLATE 
-              This is ONLY VISIBLE to html2pdf during generation.
           ========================================================= */}
           <div style={{ display: isPrinting ? 'block' : 'none', width: '900px', margin: '0 auto', background: 'white', padding: '20px', color: 'black', fontFamily: 'sans-serif' }}>
 
-            {/* Header */}
             <div style={{ borderBottom: '2px solid #e2e8f0', paddingBottom: '20px', marginBottom: '30px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
               <div>
                 <h1 style={{ fontSize: '28px', margin: '0 0 10px 0', color: '#0f172a' }}>Forensic Integrity Report</h1>
@@ -228,7 +225,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
               </div>
             </div>
 
-            {/* Key Metrics Row */}
             <div style={{ display: 'flex', gap: '40px', marginBottom: '40px', backgroundColor: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <div>
                 <p style={{ margin: 0, fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Old AST Nodes</p>
@@ -244,7 +240,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
               </div>
             </div>
 
-            {/* Print-Friendly Graph */}
             <div style={{ marginBottom: '40px' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Evolution Pulse</h3>
               <div style={{ height: '250px', width: '100%' }}>
@@ -259,7 +254,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
               </div>
             </div>
 
-            {/* Suspect Commits Alert (FIXED: Using Flex-Wrap instead of Grid) */}
             {data.clusters.suspect.commits.length > 0 && (
               <div style={{ background: '#fff1f2', padding: '20px', borderRadius: '12px', marginBottom: '40px', border: '1px solid #fecdd3' }}>
                 <h3 style={{ color: '#be123c', marginTop: 0, fontSize: '18px' }}>⚠️ High-Velocity Dumps Detected ({data.clusters.suspect.commits.length})</h3>
@@ -274,7 +268,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
               </div>
             )}
 
-            {/* ALL CLUSTERS (FIXED: Stacked vertically, Commits wrapped in columns inside) */}
             <div style={{ marginBottom: '40px' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Semantic Commit Clusters</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -286,8 +279,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
                         <h4 style={{ margin: 0, fontSize: '16px', color: '#0f172a', textTransform: 'capitalize' }}>{group.label}</h4>
                         <span style={{ fontSize: '12px', fontWeight: 'bold', backgroundColor: '#e2e8f0', padding: '4px 10px', borderRadius: '12px' }}>{group.commits.length} Commits</span>
                       </div>
-
-                      {/* Dense Flex-Wrap List for Commits */}
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
                         {group.commits.length > 0 ? group.commits.map((c, i) => (
                           <div key={i} style={{ flex: '0 0 calc(33.333% - 15px)', boxSizing: 'border-box', display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>
@@ -304,7 +295,6 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
               </div>
             </div>
 
-            {/* Standard HTML Table for Logs */}
             <div style={{ marginBottom: '40px' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Complete Audit Log</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
@@ -329,15 +319,57 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
               </table>
             </div>
 
-            {/* RAW CST FRAGMENT */}
-            <div style={{ pageBreakInside: 'avoid' }}>
+            <div style={{ pageBreakInside: 'avoid', marginBottom: '40px' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Raw CST Fragment</h3>
-              <div style={{
-                backgroundColor: '#0f172a', color: '#10b981', padding: '20px', borderRadius: '8px',
-                fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.6',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-all'
-              }}>
+              <div style={{ backgroundColor: '#0f172a', color: '#10b981', padding: '20px', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.6', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 {data.analysis.cst}
+              </div>
+            </div>
+
+            {/* =========================================================
+                NEW: APPENDIX FOR PDF (Explanatory Notes)
+            ========================================================= */}
+            <div style={{ pageBreakBefore: 'always', paddingTop: '20px' }}>
+              <h2 style={{ fontSize: '24px', color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px', marginBottom: '20px' }}>
+                Appendix: Understanding the Metrics
+              </h2>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', color: '#334155', lineHeight: '1.6' }}>
+
+                <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #4f46e5' }}>
+                  <h4 style={{ fontSize: '16px', color: '#0f172a', marginTop: '0', marginBottom: '8px' }}>1. What are AST Nodes? (Old vs. New)</h4>
+                  <p style={{ margin: 0, fontSize: '14px' }}>
+                    An Abstract Syntax Tree (AST) is a mathematical representation of the code's structure.
+                    <strong> Old AST Nodes</strong> represent the complexity of the codebase <em>before</em> the commit.
+                    <strong> New AST Nodes</strong> represent the complexity <em>after</em> the commit. Comparing them allows us to measure exact structural growth.
+                  </p>
+                </div>
+
+                <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #4f46e5' }}>
+                  <h4 style={{ fontSize: '16px', color: '#0f172a', marginTop: '0', marginBottom: '8px' }}>2. How is the Integrity Score Calculated?</h4>
+                  <p style={{ margin: 0, fontSize: '14px' }}>
+                    The engine uses the Zhang-Shasha algorithm to calculate the <strong>Tree Edit Distance</strong> (the minimum number of semantic operations needed to transform the Old AST into the New AST).
+                    The Integrity Score ($r$) is calculated as: <code>1 - (Edit Distance / Max Nodes)</code>.
+                    A massive injection of code without gradual human edits results in a low score.
+                  </p>
+                </div>
+
+                <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
+                  <h4 style={{ fontSize: '16px', color: '#0f172a', marginTop: '0', marginBottom: '8px' }}>3. What is considered a Good Score?</h4>
+                  <ul style={{ margin: '0', paddingLeft: '20px', fontSize: '14px' }}>
+                    <li style={{ marginBottom: '4px' }}><strong>0.85 - 1.00 (Authentic):</strong> Indicates steady, human-paced development and careful refactoring.</li>
+                    <li style={{ marginBottom: '4px' }}><strong>0.45 - 0.84 (Standard):</strong> Normal feature additions and expected structural modifications.</li>
+                    <li><strong>0.00 - 0.44 (Suspect):</strong> Anomalous "High-Velocity Dumps." Often indicates pasting large AI-generated blocks or uncredited boilerplate.</li>
+                  </ul>
+                </div>
+
+                <div style={{ backgroundColor: '#0f172a', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #f43f5e' }}>
+                  <h4 style={{ fontSize: '16px', color: '#f8fafc', marginTop: '0', marginBottom: '8px' }}>4. How to read the Raw CST Fragment?</h4>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#cbd5e1' }}>
+                    The Concrete Syntax Tree (CST) fragment is the raw grammar output generated by our parsers. It strips away formatting and exposes how the machine interprets the logic (e.g., separating <code>identifiers</code> and <code>jsx_elements</code>). It acts as the immutable forensic proof used to calculate the edit distance.
+                  </p>
+                </div>
+
               </div>
             </div>
 
@@ -346,6 +378,56 @@ const GitPulseMVP = ({ linkedUrl, onReset }) => {
 
         </div>
       )}
+
+      {/* =========================================================
+          NEW: INTERACTIVE METRICS GUIDE MODAL (For Web View)
+      ========================================================= */}
+      {showHelpModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '16px', maxWidth: '600px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' }}>
+
+            <div style={{ position: 'sticky', top: 0, backgroundColor: 'white', padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '16px 16px 0 0' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}><HelpCircle className="text-indigo-600" /> Metrics Guide</h2>
+              <button onClick={() => setShowHelpModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><X size={24} /></button>
+            </div>
+
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={18} className="text-indigo-500" /> AST Nodes</h3>
+                <p style={{ fontSize: '14px', color: '#475569', lineHeight: '1.6', margin: 0 }}>
+                  An Abstract Syntax Tree (AST) is a mathematical representation of code. <strong>Old Nodes</strong> measure the code's complexity before a commit, while <strong>New Nodes</strong> measure it after. This allows us to track exact structural growth rather than just "lines of code."
+                </p>
+              </div>
+
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}><ShieldCheck size={18} className="text-emerald-500" /> Integrity Score Calculation</h3>
+                <p style={{ fontSize: '14px', color: '#475569', lineHeight: '1.6', margin: 0 }}>
+                  The engine uses the Zhang-Shasha algorithm to calculate the <strong>Tree Edit Distance</strong> (the effort required to change the Old AST into the New AST). The Integrity Score ($r$) normalizes this distance from 0 to 1. A sudden, massive injection of nodes without gradual human edits yields a low score.
+                </p>
+              </div>
+
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}><Activity size={18} className="text-blue-500" /> Score Benchmarks</h3>
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  <div style={{ padding: '12px', backgroundColor: '#ecfdf5', borderRadius: '8px', fontSize: '13px', color: '#065f46' }}><strong>0.85 - 1.00 (Authentic):</strong> Steady, human-paced development.</div>
+                  <div style={{ padding: '12px', backgroundColor: '#eff6ff', borderRadius: '8px', fontSize: '13px', color: '#1e40af' }}><strong>0.45 - 0.84 (Standard):</strong> Normal feature additions.</div>
+                  <div style={{ padding: '12px', backgroundColor: '#fff1f2', borderRadius: '8px', fontSize: '13px', color: '#9f1239' }}><strong>0.00 - 0.44 (Suspect):</strong> Anomalous dumps (likely AI-generated or copy-pasted).</div>
+                </div>
+              </div>
+
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}><Terminal size={18} className="text-slate-700" /> Raw CST Fragment</h3>
+                <p style={{ fontSize: '14px', color: '#475569', lineHeight: '1.6', margin: 0 }}>
+                  The Concrete Syntax Tree (CST) fragment is the raw grammar output generated by our parsers. It strips away formatting and exposes how the machine interprets the logic. It is the immutable forensic proof used to calculate the edit distance.
+                </p>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
