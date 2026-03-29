@@ -1,17 +1,26 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, Users, ShieldAlert, CheckCircle, Activity, ExternalLink, ArrowLeft, Download, Eye, X } from 'lucide-react';
+import {
+    UploadCloud, Users, ShieldAlert, CheckCircle, Activity,
+    ExternalLink, ArrowLeft, Download, X, Search, FileText
+} from 'lucide-react';
 import GitPulseMVP from './GitPulseMVP';
 import html2pdf from 'html2pdf.js';
+
+// Import modular CSS files
+import './styles/MatrixShared.css';    // Shared buttons, badges, checkboxes
+import './styles/MatrixGrid.css';      // The main landing/roster page
+import './styles/MatrixWorkspace.css'; // The split-pane after-click page
+import './styles/MatrixPDF.css';       // The hidden downloads/report builder
 
 const ClassroomMatrix = ({ onReset }) => {
     const [students, setStudents] = useState([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [progress, setProgress] = useState({ current: 0, total: 0 });
 
-    // NEW STATES
     const [selectedIds, setSelectedIds] = useState(new Set());
     const [viewingStudent, setViewingStudent] = useState(null);
     const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
+    const [sidebarSearch, setSidebarSearch] = useState('');
     const bulkReportRef = useRef();
 
     const handleFileUpload = (event) => {
@@ -32,7 +41,7 @@ const ClassroomMatrix = ({ onReset }) => {
                     scanStatus: 'pending',
                     score: null,
                     authenticity: null,
-                    fullData: null // Store complete API response here
+                    fullData: null
                 };
             }).filter(s => s.url.includes('github.com'));
 
@@ -64,7 +73,7 @@ const ClassroomMatrix = ({ onReset }) => {
                     if (result.success) {
                         student.score = result.analysis.rewardScore;
                         student.authenticity = result.analysis.status;
-                        student.fullData = result; // Save the massive payload
+                        student.fullData = result;
                         student.scanStatus = 'complete';
                     } else {
                         student.scanStatus = 'failed';
@@ -81,8 +90,8 @@ const ClassroomMatrix = ({ onReset }) => {
         setIsProcessing(false);
     };
 
-    // CHECKBOX LOGIC
-    const toggleSelection = (id) => {
+    const toggleSelection = (id, e) => {
+        if (e) e.stopPropagation();
         const newSet = new Set(selectedIds);
         if (newSet.has(id)) newSet.delete(id);
         else newSet.add(id);
@@ -97,281 +106,568 @@ const ClassroomMatrix = ({ onReset }) => {
         }
     };
 
-    // MASTER PDF GENERATOR
-    const handleBulkDownload = () => {
+    const triggerPDF = (filenameSuffix) => {
         setIsGeneratingBulk(true);
-
-        // Give the off-screen DOM time to render the selected reports
         setTimeout(() => {
             const element = bulkReportRef.current;
             const opt = {
                 margin: 0.4,
-                filename: `ProjectVerified_MasterCohortReport_${new Date().toISOString().split('T')[0]}.pdf`,
+                filename: `ProjectVerified_${filenameSuffix}_${new Date().toISOString().split('T')[0]}.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1000 },
+                html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 800 },
                 jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
             };
 
             html2pdf().set(opt).from(element).save().then(() => {
                 setIsGeneratingBulk(false);
-                setSelectedIds(new Set()); // clear selection after download
+                setSelectedIds(new Set());
             });
         }, 800);
     };
 
-    return (
-        <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-800 pb-12">
+    const handleDownloadSelected = () => triggerPDF('Selected_Reports');
+    const handleDownloadAll = () => {
+        const allCompletedIds = students.filter(s => s.scanStatus === 'complete').map(s => s.id);
+        setSelectedIds(new Set(allCompletedIds));
+        triggerPDF('Master_Cohort_Report');
+    };
 
-            <nav className="bg-white border-b border-slate-200 sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-indigo-600 p-2 rounded-xl"><Users className="text-white" size={24} /></div>
-                        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Cohort<span className="text-indigo-600">Matrix</span></h1>
+    const completedCount = students.filter(s => s.scanStatus === 'complete').length;
+    const progressPercentage = students.length > 0 ? (progress.current / students.length) * 100 : 0;
+
+    const filteredSidebarStudents = students.filter(s =>
+        s.name.toLowerCase().includes(sidebarSearch.toLowerCase()) ||
+        s.url.toLowerCase().includes(sidebarSearch.toLowerCase())
+    );
+
+    // ==========================================
+    // RENDER: SPLIT PANE WORKSPACE (After Clicking)
+    // ==========================================
+    if (viewingStudent) {
+        return (
+            <div className="app-container workspace-view">
+                <header className="workspace-header">
+                    <div className="header-left">
+                        <button onClick={() => setViewingStudent(null)} className="btn-back">
+                            <ArrowLeft size={16} /> Back to Grid
+                        </button>
+                        <div className="header-divider"></div>
+                        <h1 className="header-title">
+                            <Activity size={18} className="icon-indigo" /> Deep Dive Analysis
+                        </h1>
                     </div>
-                    <button onClick={onReset} className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-indigo-600 transition-colors">
-                        <ArrowLeft size={16} /> Back to Single Audit
+                    <div className="header-right">
+                        <span className="selection-count">{selectedIds.size} selected for export</span>
+                        <button onClick={handleDownloadSelected} disabled={selectedIds.size === 0 || isGeneratingBulk} className="btn-primary">
+                            {isGeneratingBulk ? <Activity size={16} className="icon-spin" /> : <Download size={16} />}
+                            {isGeneratingBulk ? "Building PDF..." : "Export Batch"}
+                        </button>
+                    </div>
+                </header>
+
+                <div className="workspace-body">
+                    <main className="workspace-main custom-scrollbar">
+                        <div className="report-content-wrapper">
+                            <div className="report-student-header">
+                                <div className="student-info">
+                                    <h2>{viewingStudent.name}</h2>
+                                    <a href={viewingStudent.url} target="_blank" rel="noreferrer" className="repo-link">
+                                        {viewingStudent.url} <ExternalLink size={14} />
+                                    </a>
+                                </div>
+                                <div className="student-score-block">
+                                    <div className={`score-value ${viewingStudent.authenticity === 'Authentic' ? 'score-authentic' : 'score-suspect'}`}>
+                                        {viewingStudent.score?.toFixed(2)}
+                                    </div>
+                                    <div className="score-label">Integrity Score</div>
+                                </div>
+                            </div>
+                            <GitPulseMVP linkedUrl={viewingStudent.url} initialData={viewingStudent.fullData} isModalView={false} />
+                        </div>
+                    </main>
+
+                    <aside className="workspace-sidebar">
+                        <div className="sidebar-header">
+                            <h3>Cohort Roster ({completedCount})</h3>
+                            <div className="search-wrapper">
+                                <Search size={14} className="search-icon" />
+                                <input
+                                    type="text"
+                                    placeholder="Search by name..."
+                                    value={sidebarSearch}
+                                    onChange={(e) => setSidebarSearch(e.target.value)}
+                                    className="search-input"
+                                />
+                            </div>
+                        </div>
+                        <div className="sidebar-list custom-scrollbar">
+                            {filteredSidebarStudents.map(student => (
+                                <div
+                                    key={student.id}
+                                    onClick={() => student.scanStatus === 'complete' && setViewingStudent(student)}
+                                    className={`sidebar-card ${viewingStudent.id === student.id ? 'active' : ''} ${student.scanStatus !== 'complete' ? 'disabled' : ''}`}
+                                >
+                                    <div className="card-content">
+                                        <div className="card-checkbox">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.has(student.id)}
+                                                onChange={(e) => toggleSelection(student.id, e)}
+                                                disabled={student.scanStatus !== 'complete'}
+                                                className="custom-checkbox small"
+                                            />
+                                        </div>
+                                        <div className="card-details">
+                                            <div className="card-top-row">
+                                                <h4>{student.name}</h4>
+                                                {student.score !== null && (
+                                                    <span className={`mini-score ${student.authenticity === 'Authentic' ? 'mini-authentic' : 'mini-suspect'}`}>
+                                                        {student.score.toFixed(1)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="card-bottom-row">
+                                                {student.scanStatus === 'complete' ? (
+                                                    student.authenticity === 'Authentic'
+                                                        ? <span className="status-text authentic"><CheckCircle size={10} /> Authentic</span>
+                                                        : <span className="status-text suspect"><ShieldAlert size={10} /> Suspect</span>
+                                                ) : (
+                                                    <span className="status-text processing">Processing...</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            {filteredSidebarStudents.length === 0 && <div className="sidebar-empty">No students found.</div>}
+                        </div>
+                    </aside>
+                </div>
+
+                {/* PDF RENDERER (Duplicated to prevent mount/unmount loss) */}
+                {/* PDF RENDERER (Detailed Forensic Report) */}
+                <div className="pdf-hidden-container">
+                    <div ref={bulkReportRef} className={`pdf-document ${isGeneratingBulk ? 'active' : ''}`}>
+
+                        {/* Master Header */}
+                        <div className="pdf-header">
+                            <h1>Master Cohort Forensic Report</h1>
+                            <p>Generated: {new Date().toLocaleString()}</p>
+                            <p>Total Records: {selectedIds.size}</p>
+                        </div>
+
+                        {/* Render Each Student's Full Report */}
+                        {students.filter(s => selectedIds.has(s.id)).map(student => {
+                            if (!student.fullData) return null;
+
+                            const d = student.fullData.analysis || {};
+                            const commits = student.fullData.commits || [];
+                            const rawCst = student.fullData.rawCst || "(ERROR (jsx_opening_element name: (identifier)... [Data Truncated])";
+
+                            return (
+                                <div key={student.id} className="pdf-page-break">
+
+                                    {/* Student Header */}
+                                    <div className="pdf-student-header">
+                                        <div className="pdf-student-info">
+                                            <h2 className="pdf-title">Forensic Integrity Report</h2>
+                                            <p className="pdf-name">{student.name}</p>
+                                            <p className="pdf-url">Repository: {student.url}</p>
+                                        </div>
+                                        <div className="pdf-student-score">
+                                            <h3>{d.rewardScore?.toFixed(2) || '0.00'}</h3>
+                                            <p className={student.authenticity === 'Authentic' ? 'pdf-authentic' : 'pdf-suspect'}>
+                                                {student.authenticity?.toUpperCase() || 'UNKNOWN'}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Core Metrics Table */}
+                                    <div className="pdf-section">
+                                        <table className="pdf-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>OLD AST NODES</th>
+                                                    <th>NEW AST NODES</th>
+                                                    <th>ZHANG-SHASHA DISTANCE</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td className="pdf-large-num">{d.oldNodeCount || '0'}</td>
+                                                    <td className="pdf-large-num">{d.newNodeCount || '0'}</td>
+                                                    <td className="pdf-large-num">{d.editDistance || '0'}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Commit Audit Log */}
+                                    <div className="pdf-section">
+                                        <h3 className="pdf-section-title">Complete Audit Log</h3>
+                                        <table className="pdf-table pdf-commit-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Commit SHA</th>
+                                                    <th>Date</th>
+                                                    <th>Message</th>
+                                                    <th style={{ textAlign: 'right' }}>Score</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {commits.map(commit => (
+                                                    <tr key={commit.sha}>
+                                                        <td className="pdf-mono">{commit.sha.substring(0, 7)}</td>
+                                                        <td>{commit.date || 'Unknown'}</td>
+                                                        <td>{commit.message}</td>
+                                                        <td style={{
+                                                            textAlign: 'right',
+                                                            fontWeight: 'bold',
+                                                            color: commit.score < 0.45 ? '#be123c' : 'inherit'
+                                                        }}>
+                                                            r: {commit.score?.toFixed(2) || '0.00'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {commits.length === 0 && (
+                                                    <tr><td colSpan="4" style={{ textAlign: 'center' }}>No commit data available.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Raw CST Fragment */}
+                                    <div className="pdf-section">
+                                        <h3 className="pdf-section-title">Raw CST Fragment</h3>
+                                        <div className="pdf-code-block">
+                                            {rawCst.substring(0, 800)}{rawCst.length > 800 ? '...' : ''}
+                                        </div>
+                                    </div>
+
+                                </div>
+                            )
+                        })}
+
+                        {/* Master Appendix (Attached to the end of the batch) */}
+                        {selectedIds.size > 0 && (
+                            <div className="pdf-page-break">
+                                <div className="pdf-appendix">
+                                    <h2>Appendix: Understanding the Metrics</h2>
+
+                                    <h4>1. What are AST Nodes? (Old vs. New)</h4>
+                                    <p>An Abstract Syntax Tree (AST) is a mathematical representation of the code's structure. Old AST Nodes represent the codebase before the commit. New AST Nodes represent the complexity after the commit. Comparing them analyzes structural growth.</p>
+
+                                    <h4>2. How is the Integrity Score Calculated?</h4>
+                                    <p>The engine uses the Zhang-Shasha algorithm to calculate the Tree Edit Distance (the minimum number of steps to transform the Old AST into the New AST). The Integrity Score (r) evaluates this distance over time. High injection of code without gradual human edits results in a low score.</p>
+
+                                    <h4>3. What is considered a Good Score?</h4>
+                                    <ul>
+                                        <li><strong>0.85 - 1.00 (Authentic):</strong> Indicates steady, human-paced development and careful refactoring.</li>
+                                        <li><strong>0.45 - 0.84 (Standard):</strong> Normal feature additions and expected structural modifications.</li>
+                                        <li><strong>0.00 - 0.44 (Suspect):</strong> Anomalous "High-Velocity Dumps." Often indicates pasting large AI-generated blocks.</li>
+                                    </ul>
+
+                                    <h4>4. How to read the Raw CST Fragment?</h4>
+                                    <p>The Concrete Syntax Tree (CST) fragment is the raw grammar output generated by our parsers. It acts as the immutable data source to calculate the edit distance.</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ==========================================
+    // RENDER: MAIN GRID VIEW (Landing Page)
+    // ==========================================
+    return (
+        <div className="app-container grid-view">
+            <nav className="main-nav">
+                <div className="nav-content">
+                    <div className="nav-logo">
+                        <div className="logo-icon"><Users size={20} /></div>
+                        <h1>Cohort<span>Matrix</span></h1>
+                    </div>
+                    <button onClick={onReset} className="btn-text">
+                        <ArrowLeft size={16} className="arrow-icon" /> Back to Single Audit
                     </button>
                 </div>
             </nav>
 
-            <div className="max-w-7xl mx-auto px-6 mt-8 relative">
-
-                {/* Upload Screen */}
+            <div className="grid-content-wrapper">
                 {students.length === 0 && (
-                    <div className="bg-white border-2 border-dashed border-slate-300 rounded-3xl p-16 text-center mt-12 hover:border-indigo-500 transition-colors">
-                        <div className="bg-indigo-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <UploadCloud size={32} className="text-indigo-600" />
-                        </div>
-                        <h2 className="text-2xl font-bold text-slate-800 mb-2">Upload Class Roster (.csv)</h2>
-                        <p className="text-slate-500 mb-8 max-w-md mx-auto">Upload a CSV file with two columns: <strong>Student Name</strong> and <strong>GitHub URL</strong>.</p>
-                        <label className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold cursor-pointer hover:bg-slate-800 transition-colors shadow-sm">
-                            Select CSV File
-                            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                    <div className="upload-container">
+                        <div className="upload-icon-wrapper"><UploadCloud size={32} /></div>
+                        <h2>Import Class Roster</h2>
+                        <p>Upload a <strong>.csv</strong> file containing Student Names and their GitHub Repository URLs.</p>
+                        <label className="btn-upload">
+                            <span>Select CSV File</span>
+                            <input type="file" accept=".csv" onChange={handleFileUpload} />
                         </label>
                     </div>
                 )}
 
-                {/* Data Table */}
                 {students.length > 0 && (
-                    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in duration-500">
-
-                        <div className="p-6 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                            <div>
-                                <h2 className="text-xl font-bold text-slate-800">Classroom Integrity Report</h2>
-                                <p className="text-sm text-slate-500">Processing {students.length} repositories</p>
+                    <div className="table-section fade-in">
+                        <div className="table-header-block">
+                            <div className="table-titles">
+                                <h2>Project Validation Grid</h2>
+                                <p>Analyzing {students.length} repositories</p>
                             </div>
-
-                            {/* ACTION BAR (Appears when items are selected) */}
-                            {selectedIds.size > 0 && !isProcessing && (
-                                <div className="flex items-center gap-4 bg-indigo-50 border border-indigo-100 px-4 py-2 rounded-xl animate-in fade-in zoom-in-95 duration-200">
-                                    <span className="text-sm font-bold text-indigo-700">{selectedIds.size} Selected</span>
-                                    <button
-                                        onClick={handleBulkDownload}
-                                        disabled={isGeneratingBulk}
-                                        className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                                    >
-                                        {isGeneratingBulk ? <Activity size={14} className="animate-spin" /> : <Download size={14} />}
-                                        {isGeneratingBulk ? "Building Master PDF..." : "Download Master PDF"}
-                                    </button>
-                                </div>
-                            )}
-
-                            {isProcessing && (
-                                <div className="flex items-center gap-4 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm">
-                                    <Activity size={16} className="animate-spin" /> Scanning: {progress.current} / {progress.total}
-                                </div>
+                            {!isProcessing && completedCount > 0 && (
+                                <button onClick={handleDownloadAll} disabled={isGeneratingBulk} className="btn-secondary">
+                                    {isGeneratingBulk ? <Activity size={16} className="icon-spin" /> : <FileText size={16} />}
+                                    {isGeneratingBulk ? "Building..." : "Export Full Roster"}
+                                </button>
                             )}
                         </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
+                        {isProcessing && (
+                            <div className="progress-container">
+                                <div className="progress-text">
+                                    <span><Activity size={16} className="icon-spin icon-indigo" /> Scanning repositories...</span>
+                                    <span>{progress.current} / {progress.total}</span>
+                                </div>
+                                <div className="progress-bar-bg">
+                                    <div className="progress-bar-fill" style={{ width: `${progressPercentage}%` }}></div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="table-container custom-scrollbar">
+                            <table className="matrix-table">
                                 <thead>
-                                    <tr className="bg-white border-b-2 border-slate-100 text-slate-500 text-sm tracking-wide">
-                                        <th className="py-4 px-6 w-12">
-                                            <input
-                                                type="checkbox"
-                                                onChange={toggleAll}
-                                                checked={selectedIds.size === students.filter(s => s.scanStatus === 'complete').length && students.length > 0}
-                                                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                                                disabled={isProcessing}
-                                            />
+                                    <tr>
+                                        <th className="th-checkbox">
+                                            <input type="checkbox" onChange={toggleAll} checked={selectedIds.size === completedCount && students.length > 0} className="custom-checkbox" disabled={isProcessing} />
                                         </th>
-                                        <th className="py-4 px-4 font-bold">Student Name</th>
-                                        <th className="py-4 px-4 font-bold">Repository</th>
-                                        <th className="py-4 px-4 font-bold text-center">Status</th>
-                                        <th className="py-4 px-4 font-bold text-center">Integrity Score</th>
-                                        <th className="py-4 px-6 font-bold text-right">Action</th>
+                                        <th>Student Name</th>
+                                        <th>Repository</th>
+                                        <th className="align-center">Status</th>
+                                        <th className="align-center">Score</th>
+                                        <th className="align-right">Action</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100">
+                                <tbody>
                                     {students.map((student) => (
-                                        <tr key={student.id} className={`transition-colors ${selectedIds.has(student.id) ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
-
-                                            <td className="py-4 px-6">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedIds.has(student.id)}
-                                                    onChange={() => toggleSelection(student.id)}
-                                                    disabled={student.scanStatus !== 'complete'}
-                                                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
-                                                />
+                                        <tr key={student.id} className={`matrix-row ${selectedIds.has(student.id) ? 'selected' : ''}`} onClick={() => student.scanStatus === 'complete' && setViewingStudent(student)}>
+                                            <td className="td-checkbox" onClick={(e) => e.stopPropagation()}>
+                                                <input type="checkbox" checked={selectedIds.has(student.id)} onChange={(e) => toggleSelection(student.id, e)} disabled={student.scanStatus !== 'complete'} className="custom-checkbox" />
                                             </td>
-
-                                            <td className="py-4 px-4 font-bold text-slate-800">{student.name}</td>
-
-                                            <td className="py-4 px-4">
-                                                <a href={student.url} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-indigo-600 flex items-center gap-1 text-sm font-mono truncate max-wxs">
-                                                    {student.url.split('/').slice(-2).join('/')} <ExternalLink size={12} />
+                                            <td className="td-name">{student.name}</td>
+                                            <td className="td-repo" onClick={(e) => e.stopPropagation()}>
+                                                <a href={student.url} target="_blank" rel="noreferrer" className="repo-link">
+                                                    {student.url.split('/').slice(-2).join('/')} <ExternalLink size={14} className="hover-icon" />
                                                 </a>
                                             </td>
-
-                                            <td className="py-4 px-4 text-center">
-                                                {student.scanStatus === 'pending' && <span className="inline-flex text-slate-400 text-xs font-bold items-center gap-1">Waiting...</span>}
-                                                {student.scanStatus === 'scanning' && <span className="inline-flex text-blue-600 text-xs font-bold items-center gap-1"><Activity size={12} className="animate-spin" /> Parsing</span>}
-                                                {student.scanStatus === 'failed' && <span className="inline-flex text-rose-500 text-xs font-bold">Error</span>}
+                                            <td className="td-status align-center">
+                                                {student.scanStatus === 'pending' && <span className="badge badge-waiting">Waiting</span>}
+                                                {student.scanStatus === 'scanning' && <span className="badge badge-parsing"><span className="pulse-dot"></span> Parsing</span>}
+                                                {student.scanStatus === 'failed' && <span className="badge badge-error">Error</span>}
                                                 {student.scanStatus === 'complete' && (
                                                     student.authenticity === 'Authentic'
-                                                        ? <span className="inline-flex bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold items-center gap-1"><CheckCircle size={12} /> Authentic</span>
-                                                        : <span className="inline-flex bg-rose-100 text-rose-700 px-3 py-1 rounded-full text-xs font-bold items-center gap-1"><ShieldAlert size={12} /> Suspect</span>
+                                                        ? <span className="badge badge-authentic"><span className="status-dot green"></span> Authentic</span>
+                                                        : <span className="badge badge-suspect"><span className="status-dot orange"></span> Suspect</span>
                                                 )}
                                             </td>
-
-                                            {/* Clicking the score also opens the modal */}
-                                            <td className="py-4 px-4 text-center cursor-pointer group" onClick={() => student.scanStatus === 'complete' && setViewingStudent(student)}>
+                                            <td className="td-score align-center">
                                                 {student.score !== null ? (
-                                                    <span className={`text-xl font-black group-hover:underline ${student.authenticity === 'Authentic' ? 'text-slate-800' : 'text-rose-600'}`}>
+                                                    <span className={`score-pill ${student.authenticity === 'Authentic' ? 'pill-gray' : 'pill-orange'}`}>
                                                         {student.score.toFixed(2)}
                                                     </span>
-                                                ) : <span className="text-slate-300">-</span>}
+                                                ) : <span className="score-empty">-</span>}
                                             </td>
-
-                                            <td className="py-4 px-6 text-right">
-                                                <button
-                                                    onClick={() => setViewingStudent(student)}
-                                                    disabled={student.scanStatus !== 'complete'}
-                                                    className="text-indigo-600 font-bold text-sm flex items-center gap-1 ml-auto hover:text-indigo-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                                >
-                                                    <Eye size={16} /> View
+                                            <td className="td-action align-right">
+                                                <button onClick={(e) => { e.stopPropagation(); setViewingStudent(student); }} disabled={student.scanStatus !== 'complete'} className="btn-action">
+                                                    Open Analysis <ArrowLeft size={14} className="icon-flip" />
                                                 </button>
                                             </td>
-
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
-
                     </div>
                 )}
             </div>
 
-            {/* =========================================================
-          FEATURE 1: FULL SCREEN REPORT MODAL 
-      ========================================================= */}
-            {viewingStudent && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-6">
-                    <div className="bg-white w-full max-w-7xl h-[90vh] rounded-3xl overflow-hidden relative flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
-                        {/* Modal Header */}
-                        <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
-                            <h2 className="font-bold flex items-center gap-2"><Activity size={18} /> Student Report: {viewingStudent.name}</h2>
-                            <button onClick={() => setViewingStudent(null)} className="hover:bg-slate-800 p-2 rounded-full transition-colors text-slate-300 hover:text-white"><X size={20} /></button>
-                        </div>
-                        {/* Modal Body (Reuses the GitPulseMVP component flawlessly by passing initialData!) */}
-                        <div className="overflow-y-auto flex-1 bg-[#F8FAFC]">
-                            <GitPulseMVP
-                                linkedUrl={viewingStudent.url}
-                                initialData={viewingStudent.fullData}
-                                isModalView={true}
-                            />
-                        </div>
+            {/* FLOATING ACTION BAR */}
+            <div className={`floating-action-bar ${selectedIds.size > 0 ? 'visible' : ''}`}>
+                <div className="fab-content">
+                    <div className="fab-count-group">
+                        <div className="fab-count">{selectedIds.size}</div>
+                        <span>Selected</span>
                     </div>
-                </div>
-            )}
-
-            {/* =========================================================
-          FEATURE 2: HIDDEN MASTER PDF RENDERER (Bulk Export)
-          This renders a fast, text-based forensic report for all selected students 
-          off-screen so html2canvas can capture it as one continuous document.
-      ========================================================= */}
-            <div style={{ position: 'fixed', top: '-10000px', left: 0, zIndex: -1 }}>
-                <div ref={bulkReportRef} style={{ display: isGeneratingBulk ? 'block' : 'none', width: '900px', background: 'white', padding: '40px', color: 'black', fontFamily: 'sans-serif' }}>
-
-                    {/* Cover Page */}
-                    <div style={{ borderBottom: '2px solid #e2e8f0', paddingBottom: '20px', marginBottom: '30px' }}>
-                        <h1 style={{ fontSize: '32px', margin: '0 0 10px 0', color: '#0f172a' }}>Master Cohort Forensic Report</h1>
-                        <p style={{ margin: 0, color: '#64748b' }}>Generated: {new Date().toLocaleString()}</p>
-                        <p style={{ margin: 0, color: '#64748b' }}>Total Records: {selectedIds.size}</p>
-                    </div>
-
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px', marginBottom: '40px' }}>
-                        <thead>
-                            <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
-                                <th style={{ padding: '12px', borderBottom: '2px solid #0f172a' }}>Student Name</th>
-                                <th style={{ padding: '12px', borderBottom: '2px solid #0f172a' }}>Repository</th>
-                                <th style={{ padding: '12px', borderBottom: '2px solid #0f172a' }}>Status</th>
-                                <th style={{ padding: '12px', borderBottom: '2px solid #0f172a', textAlign: 'right' }}>Score</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {students.filter(s => selectedIds.has(s.id)).map(s => (
-                                <tr key={s.id}>
-                                    <td style={{ padding: '12px', borderBottom: '1px solid #e2e8f0', fontWeight: 'bold' }}>{s.name}</td>
-                                    <td style={{ padding: '12px', borderBottom: '1px solid #e2e8f0', fontFamily: 'monospace' }}>{s.url.split('/').pop()}</td>
-                                    <td style={{ padding: '12px', borderBottom: '1px solid #e2e8f0', color: s.authenticity === 'Authentic' ? '#10b981' : '#f43f5e', fontWeight: 'bold' }}>{s.authenticity}</td>
-                                    <td style={{ padding: '12px', borderBottom: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 'bold' }}>{s.score?.toFixed(2)}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-
-                    {/* Individual Student Breakdown (Page Breaks automatically added by the generator) */}
-                    {students.filter(s => selectedIds.has(s.id)).map(student => {
-                        const d = student.fullData.analysis;
-                        return (
-                            <div key={student.id} style={{ pageBreakBefore: 'always', paddingTop: '20px' }}>
-
-                                <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                                    <div>
-                                        <h2 style={{ fontSize: '24px', margin: '0 0 5px 0', color: '#0f172a' }}>{student.name}</h2>
-                                        <p style={{ margin: 0, color: '#64748b', fontFamily: 'monospace' }}>{student.url}</p>
-                                    </div>
-                                    <div style={{ textAlign: 'right' }}>
-                                        <h3 style={{ fontSize: '32px', margin: 0, color: '#0f172a', lineHeight: '1' }}>{d.rewardScore.toFixed(2)}</h3>
-                                        <p style={{ margin: 0, fontWeight: 'bold', color: student.authenticity === 'Authentic' ? '#10b981' : '#f43f5e' }}>{student.authenticity.toUpperCase()}</p>
-                                    </div>
-                                </div>
-
-                                <div style={{ display: 'flex', gap: '30px', marginBottom: '30px', backgroundColor: '#f8fafc', padding: '15px', borderRadius: '8px' }}>
-                                    <div><p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>OLD AST</p><p style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>{d.oldNodeCount}</p></div>
-                                    <div><p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>NEW AST</p><p style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>{d.newNodeCount}</p></div>
-                                    <div><p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>ZHANG-SHASHA</p><p style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#4f46e5' }}>{d.editDistance}</p></div>
-                                </div>
-
-                                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '8px', borderBottom: '1px solid #cbd5e1' }}>Commit</th>
-                                            <th style={{ padding: '8px', borderBottom: '1px solid #cbd5e1' }}>Message</th>
-                                            <th style={{ padding: '8px', borderBottom: '1px solid #cbd5e1', textAlign: 'right' }}>Score</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {student.fullData.commits.map(c => (
-                                            <tr key={c.sha}>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f5f9', fontFamily: 'monospace', color: '#4f46e5' }}>{c.sha}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f5f9' }}>{c.message.substring(0, 50)}{c.message.length > 50 ? '...' : ''}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', fontWeight: 'bold', color: c.score < 0.45 ? '#be123c' : 'inherit' }}>{c.score}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )
-                    })}
-
+                    <div className="fab-divider"></div>
+                    <button onClick={handleDownloadSelected} disabled={isGeneratingBulk} className="btn-fab-primary">
+                        {isGeneratingBulk ? <Activity size={16} className="icon-spin" /> : <Download size={16} />}
+                        {isGeneratingBulk ? "Generating PDF..." : "Download Selected"}
+                    </button>
+                    <button onClick={() => setSelectedIds(new Set())} className="btn-fab-close"><X size={16} /></button>
                 </div>
             </div>
 
+            {/* PDF RENDERER (Detailed Forensic Report) */}
+            <div className="pdf-hidden-container">
+                <div ref={bulkReportRef} className={`pdf-document ${isGeneratingBulk ? 'active' : ''}`}>
+
+                    {/* Master Header */}
+                    <div className="pdf-header">
+                        <h1>Master Cohort Forensic Report</h1>
+                        <p>Generated: {new Date().toLocaleString()}</p>
+                        <p>Total Records: {selectedIds.size}</p>
+                    </div>
+
+                    {/* NEW: Executive Summary Table on Page 1 */}
+                    {selectedIds.size > 0 && (
+                        <div className="pdf-summary-section">
+                            <h3 className="pdf-section-title">Executive Summary</h3>
+                            {/* ADDED 'summary-table' CLASS */}
+                            <table className="pdf-table summary-table">
+                                <thead>
+                                    <tr>
+                                        <th>Student Name</th>
+                                        <th>Project Repository</th>
+                                        <th style={{ textAlign: 'right' }}>Integrity Score</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {students.filter(s => selectedIds.has(s.id)).map(student => (
+                                        <tr key={`summary-${student.id}`}>
+                                            <td style={{ fontWeight: 'bold', color: '#0f172a' }}>{student.name}</td>
+                                            <td className="pdf-mono">{student.url.split('/').pop()}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 'bold' }} className={student.authenticity === 'Authentic' ? 'pdf-authentic' : 'pdf-suspect'}>
+                                                {student.score !== null ? student.score.toFixed(2) : 'N/A'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* Render Each Student's Full Report (Starts on Page 2) */}
+                    <div className="pdf-detailed-reports">
+                        {students.filter(s => selectedIds.has(s.id)).map(student => {
+                            if (!student.fullData) return null;
+
+                            const d = student.fullData.analysis || {};
+                            const commits = student.fullData.commits || [];
+                            const rawCst = student.fullData.rawCst || "(ERROR (jsx_opening_element name: (identifier)... [Data Truncated])";
+
+                            return (
+                                <div key={student.id} className="pdf-page-break">
+
+                                    {/* Student Header */}
+                                    <div className="pdf-student-header">
+                                        <div className="pdf-student-info">
+                                            <h2 className="pdf-title">Forensic Integrity Report</h2>
+                                            <p className="pdf-name">{student.name}</p>
+                                            <p className="pdf-url">Repository: {student.url}</p>
+                                        </div>
+                                        <div className="pdf-student-score" style={{ textAlign: 'right' }}>
+                                            <p className="pdf-title" style={{ marginBottom: '4px', color: '#64748b' }}>Integrity Score</p>
+                                            <h3>{d.rewardScore?.toFixed(2) || '0.00'}</h3>
+                                            <p className={student.authenticity === 'Authentic' ? 'pdf-authentic' : 'pdf-suspect'}>
+                                                {student.authenticity?.toUpperCase() || 'UNKNOWN'}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Core Metrics Table */}
+                                    <div className="pdf-section">
+                                        <table className="pdf-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>OLD AST NODES</th>
+                                                    <th>NEW AST NODES</th>
+                                                    <th>ZHANG-SHASHA DISTANCE</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td className="pdf-large-num">{d.oldNodeCount || '0'}</td>
+                                                    <td className="pdf-large-num">{d.newNodeCount || '0'}</td>
+                                                    <td className="pdf-large-num">{d.editDistance || '0'}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Commit Audit Log */}
+                                    <div className="pdf-section">
+                                        <h3 className="pdf-section-title">Complete Audit Log</h3>
+                                        <table className="pdf-table pdf-commit-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Commit SHA</th>
+                                                    <th>Date</th>
+                                                    <th>Message</th>
+                                                    <th style={{ textAlign: 'right' }}>Score</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {commits.map(commit => (
+                                                    <tr key={commit.sha}>
+                                                        <td className="pdf-mono">{commit.sha.substring(0, 7)}</td>
+                                                        <td>{commit.date || 'Unknown'}</td>
+                                                        <td className="pdf-wrap-text">{commit.message}</td>
+                                                        <td style={{
+                                                            textAlign: 'right',
+                                                            fontWeight: 'bold',
+                                                            color: commit.score < 0.45 ? '#be123c' : 'inherit'
+                                                        }}>
+                                                            r: {commit.score?.toFixed(2) || '0.00'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {commits.length === 0 && (
+                                                    <tr><td colSpan="4" style={{ textAlign: 'center' }}>No commit data available.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Raw CST Fragment */}
+                                    <div className="pdf-section">
+                                        <h3 className="pdf-section-title">Raw CST Fragment</h3>
+                                        <div className="pdf-code-block">
+                                            {rawCst.substring(0, 800)}{rawCst.length > 800 ? '...' : ''}
+                                        </div>
+                                    </div>
+
+                                </div>
+                            )
+                        })}
+                    </div>
+
+                    {/* Master Appendix (Attached to the end of the batch) */}
+                    {selectedIds.size > 0 && (
+                        <div className="pdf-page-break">
+                            <div className="pdf-appendix">
+                                <h2>Appendix: Understanding the Metrics</h2>
+
+                                <h4>1. What are AST Nodes? (Old vs. New)</h4>
+                                <p>An Abstract Syntax Tree (AST) is a mathematical representation of the code's structure. Old AST Nodes represent the codebase before the commit. New AST Nodes represent the complexity after the commit. Comparing them analyzes structural growth.</p>
+
+                                <h4>2. How is the Integrity Score Calculated?</h4>
+                                <p>The engine uses the Zhang-Shasha algorithm to calculate the Tree Edit Distance (the minimum number of steps to transform the Old AST into the New AST). The Integrity Score (r) evaluates this distance over time. High injection of code without gradual human edits results in a low score.</p>
+
+                                <h4>3. What is considered a Good Score?</h4>
+                                <ul>
+                                    <li><strong>0.85 - 1.00 (Authentic):</strong> Indicates steady, human-paced development and careful refactoring.</li>
+                                    <li><strong>0.45 - 0.84 (Standard):</strong> Normal feature additions and expected structural modifications.</li>
+                                    <li><strong>0.00 - 0.44 (Suspect):</strong> Anomalous "High-Velocity Dumps." Often indicates pasting large AI-generated blocks.</li>
+                                </ul>
+
+                                <h4>4. How to read the Raw CST Fragment?</h4>
+                                <p>The Concrete Syntax Tree (CST) fragment is the raw grammar output generated by our parsers. It acts as the immutable data source to calculate the edit distance.</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 };

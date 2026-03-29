@@ -1,0 +1,356 @@
+/* Container rules */
+.pdf-hidden-container {
+    position: absolute;
+    top: -10000px;
+    left: -10000px;
+    z-index: -1;
+    width: 750px;
+    /* Reduced to strictly fit A4 width */
+    pointer-events: none;
+}
+
+.pdf-document {
+    width: 750px;
+    /* Reduced to strictly fit A4 width */
+    background: white;
+    padding: 30px;
+    color: #1e293b;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+/* Base Table Rules */
+.pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 13px;
+    table-layout: fixed;
+    /* CRITICAL: Forces columns to obey our widths */
+}
+
+.pdf-table th,
+.pdf-table td {
+    padding: 12px;
+    border-bottom: 1px solid #cbd5e1;
+    word-wrap: break-word;
+    /* Prevents long text from stretching the table */
+    overflow-wrap: break-word;
+}
+
+.pdf-table th {
+    background-color: #f8fafc;
+    color: #475569;
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+/* Strict Column Widths for Summary Table */
+.summary-table th:nth-child(1) {
+    width: 35%;
+}
+
+.summary-table th:nth-child(2) {
+    width: 45%;
+}
+
+.summary-table th:nth-child(3) {
+    width: 20%;
+}
+
+/* Strict Column Widths for AST Metrics Table */
+.ast-table th:nth-child(1) {
+    width: 33%;
+}
+
+.ast-table th:nth-child(2) {
+    width: 33%;
+}
+
+.ast-table th:nth-child(3) {
+    width: 34%;
+}
+
+/* Strict Column Widths for Commit Audit Log */
+.pdf-commit-table th:nth-child(1) {
+    width: 15%;
+}
+
+.pdf-commit-table th:nth-child(2) {
+    width: 25%;
+}
+
+.pdf-commit-table th:nth-child(3) {
+    width: 45%;
+}
+
+.pdf-commit-table th:nth-child(4) {
+    width: 15%;
+}
+
+/* Ensure long commit messages wrap */
+
+/* Code Blocks */
+.pdf-code-block {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11px;
+    color: #475569;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-wrap: break-word;
+    line-height: 1.5;
+    box-sizing: border-box;
+}
+
+/* Aggressive wrapping for raw data */
+
+/* Appendix */
+.pdf-appendix {
+    background-color: #f8fafc;
+    padding: 32px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-sizing: border-box;
+}
+
+.pdf-appendix h2 {
+    font-size: 24px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 24px 0;
+}
+
+.pdf-appendix h4 {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 24px 0 8px 0;
+}
+
+.pdf-appendix p,
+.pdf-appendix ul {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #475569;
+    margin: 0;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+.pdf-appendix ul {
+    padding-left: 20px;
+    margin-top: 8px;
+}
+
+.pdf-appendix li {
+    margin-bottom: 8px;
+}
+
+/* Container rules handled at the top of file */
+
+/* Master Header */
+.pdf-header {
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 20px;
+    margin-bottom: 40px;
+}
+
+.pdf-header h1 {
+    font-size: 32px;
+    margin: 0 0 8px 0;
+    color: #0f172a;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+}
+
+.pdf-header p {
+    margin: 0 0 4px 0;
+    color: #64748b;
+    font-size: 14px;
+}
+
+/* Page Breaks */
+.pdf-page-break {
+    page-break-before: always;
+    padding-top: 30px;
+}
+
+.pdf-page-break:first-of-type {
+    page-break-before: auto;
+    padding-top: 0;
+}
+
+/* Student Header */
+.pdf-student-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 1px solid #cbd5e1;
+    padding-bottom: 16px;
+    margin-bottom: 30px;
+}
+
+.pdf-title {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin: 0 0 8px 0;
+    font-weight: 700;
+}
+
+.pdf-name {
+    font-size: 28px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 4px 0;
+}
+
+.pdf-url {
+    margin: 0;
+    color: #4f46e5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 14px;
+}
+
+.pdf-student-score {
+    text-align: right;
+    padding-right: 15px;
+}
+
+.pdf-student-score h3 {
+    font-size: 40px;
+    font-weight: 900;
+    margin: 0;
+    line-height: 1;
+    letter-spacing: -0.05em;
+}
+
+.pdf-student-score p {
+    margin: 4px 0 0 0;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 0.05em;
+}
+
+.pdf-authentic {
+    color: #10b981;
+}
+
+.pdf-suspect {
+    color: #e11d48;
+}
+
+/* Sections & Tables */
+.pdf-section {
+    margin-bottom: 40px;
+}
+
+.pdf-section-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #0f172a;
+    border-bottom: 2px solid #f1f5f9;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+}
+
+.pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 14px;
+}
+
+.pdf-table th {
+    background-color: #f8fafc;
+    color: #475569;
+    font-size: 12px;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 12px;
+    border-bottom: 1px solid #cbd5e1;
+}
+
+.pdf-table td {
+    padding: 12px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+}
+
+.pdf-large-num {
+    font-size: 20px !important;
+    font-weight: 700;
+    color: #0f172a !important;
+}
+
+/* Commit Table Specifics */
+.pdf-commit-table td {
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
+.pdf-mono {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: #4f46e5 !important;
+}
+
+/* Code Blocks */
+.pdf-code-block {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px;
+    color: #475569;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+/* Appendix */
+.pdf-appendix {
+    background-color: #f8fafc;
+    padding: 32px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+}
+
+.pdf-appendix h2 {
+    font-size: 24px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 24px 0;
+}
+
+.pdf-appendix h4 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 24px 0 8px 0;
+}
+
+.pdf-appendix p,
+.pdf-appendix ul {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #475569;
+    margin: 0;
+}
+
+.pdf-appendix ul {
+    padding-left: 20px;
+    margin-top: 8px;
+}
+
+.pdf-appendix li {
+    margin-bottom: 8px;
+}
