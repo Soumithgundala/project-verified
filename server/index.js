@@ -95,30 +95,70 @@ function splitDiff(patch) {
  * Fetches the 'Verifiable Technical History' [cite: 7]
  * and generates a Concrete Syntax Tree for semantic reasoning [cite: 19]
  */
+// ... (Keep your existing imports, Tree-Sitter init, and helper functions)
+
+// =================================================================
+// THE INTELLIGENT CACHE
+// Key: "owner/repo"
+// Value: { latestSha: "abc123", rawResults: [...], payload: {...} }
+// =================================================================
+const repoCache = new Map();
+
 app.post('/api/link-repo', async (req, res) => {
   const { url } = req.body;
 
   try {
     const { owner, repo } = parseGithubUrl(url);
+    const cacheKey = `${owner}/${repo}`;
 
-    // 1. Fetch the full commit history (up to 30 for performance)
+    // 1. Fetch the latest commits from GitHub (Lightweight API call)
     const commitsResponse = await axios.get(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?per_page=30`,
       { headers }
     );
+    const fetchedCommits = commitsResponse.data;
 
-    const allCommits = commitsResponse.data;
+    if (!fetchedCommits || fetchedCommits.length === 0) {
+      throw new Error("No commits found in this repository.");
+    }
 
-    // 2. Map-Reduce: Process all commits in parallel for speed
-    const pulseDataResults = await Promise.all(allCommits.map(async (c) => {
+    const latestSha = fetchedCommits[0].sha;
+    const cachedData = repoCache.get(cacheKey);
+
+    // ==========================================
+    // SCENARIO A: EXACT CACHE HIT (No new commits)
+    // ==========================================
+    if (cachedData && cachedData.latestSha === latestSha) {
+      console.log(`🟢 [CACHE HIT] Instant load for ${cacheKey} (No new commits)`);
+      return res.json({ success: true, ...cachedData.payload });
+    }
+
+    // ==========================================
+    // SCENARIO B: DELTA UPDATE OR CACHE MISS
+    // ==========================================
+    let newCommitsToProcess = [];
+
+    if (cachedData) {
+      console.log(`🟡 [DELTA UPDATE] New commits detected for ${cacheKey}. Slicing new data...`);
+      // Find only the commits that happened AFTER our last cached SHA
+      for (const c of fetchedCommits) {
+        if (c.sha === cachedData.latestSha) break; // Stop when we hit the known commit
+        newCommitsToProcess.push(c);
+      }
+    } else {
+      console.log(`🔴 [CACHE MISS] First time processing ${cacheKey}. Running full history...`);
+      newCommitsToProcess = fetchedCommits;
+    }
+
+    // 2. Process ONLY the new commits through the WebAssembly Parser
+    const newPulseDataResults = await Promise.all(newCommitsToProcess.map(async (c) => {
       try {
         const detail = await axios.get(
           `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${c.sha}`,
           { headers }
         );
 
-        // Filter for source code files only
-        const validExtensions = ['.js', '.jsx', '.ts', '.tsx'];
+        const validExtensions = Object.keys(extensionMap);
         const sourceFile = detail.data.files.find(f =>
           validExtensions.some(ext => f.filename?.endsWith(ext))
         );
@@ -129,28 +169,20 @@ app.post('/api/link-repo', async (req, res) => {
 
         if (parser && rawHunk && sourceFile) {
           const fileExt = validExtensions.find(ext => sourceFile.filename.endsWith(ext));
-
-          // 2. Look up the language (e.g., 'python')
           const langKey = extensionMap[fileExt];
-
-          // 3. Get the loaded WASM grammar
           const targetGrammar = grammars[langKey];
 
           if (targetGrammar) {
-            // 4. SWITCH THE PARSER'S BRAIN TO THE NEW LANGUAGE
             parser.setLanguage(targetGrammar);
-
             const { oldCode, newCode } = splitDiff(rawHunk);
             const treeOld = parser.parse(oldCode);
             const treeNew = parser.parse(newCode);
+
             n1 = treeOld.rootNode.descendantCount;
             n2 = treeNew.rootNode.descendantCount;
             d = Math.abs(n2 - n1);
             r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
             cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
-          }
-          else {
-            cstStr = `Grammar for ${langKey} not loaded on server.`;
           }
         }
 
@@ -163,62 +195,64 @@ app.post('/api/link-repo', async (req, res) => {
           details: { n1, n2, d, cstStr }
         };
       } catch (err) {
-        return null; // Skip failed fetches
+        return null; // Skip if GitHub API fails on a specific file
       }
     }));
 
-    // Clean up results and sort by date (Oldest -> Newest for the Graph)
-    const validResults = pulseDataResults.filter(r => r !== null);
+    const validNewResults = newPulseDataResults.filter(r => r !== null);
+
+    // 3. MERGE: Combine newly parsed commits with previously cached commits
+    let combinedResults = [];
+    if (cachedData) {
+      combinedResults = [...validNewResults, ...cachedData.rawResults];
+      // Cap the history at 30 to prevent memory leaks over time
+      combinedResults = combinedResults.slice(0, 30);
+    } else {
+      combinedResults = validNewResults;
+    }
+
+    // 4. RECALCULATE: Sort and Cluster the combined dataset
+    const graphData = [...combinedResults].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const historyLog = [...combinedResults].sort((a, b) => new Date(b.date) - new Date(a.date));
+
     const clusters = {
       authentic: { label: "Steady Refactoring", color: "emerald", commits: [] },
       standard: { label: "Active Development", color: "blue", commits: [] },
       suspect: { label: "High-Velocity Dumps", color: "rose", commits: [] }
     };
 
-    validResults.forEach(item => {
-      if (item.score >= 0.85) {
-        clusters.authentic.commits.push(item);
-      } else if (item.score >= 0.45) {
-        clusters.standard.commits.push(item);
-      } else {
-        clusters.suspect.commits.push(item);
-      }
+    combinedResults.forEach(item => {
+      if (item.score >= 0.85) clusters.authentic.commits.push(item);
+      else if (item.score >= 0.45) clusters.standard.commits.push(item);
+      else clusters.suspect.commits.push(item);
     });
 
-    const graphData = [...validResults].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const latest = historyLog[0] || { details: { n1: 0, n2: 0, d: 0, cstStr: "" }, score: 1 };
 
-    // Newest first for the History Log
-    const historyLog = [...validResults].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    // Add fallback if repository had zero commits or zero valid source files
-    if (historyLog.length === 0) {
-      return res.json({
-        success: true,
-        repoInfo: { owner, repo },
-        commits: [],
-        pulseData: [],
-        analysis: { oldNodeCount: 0, newNodeCount: 0, editDistance: 0, rewardScore: 0, status: "Unknown", cst: "No valid data" },
-        clusters: clusters
-      });
-    }
-
-    const latest = historyLog[0];
-
-    res.json({
-      success: true,
+    // 5. The Final Payload
+    const finalPayload = {
       repoInfo: { owner, repo },
       commits: historyLog,
       pulseData: graphData.map(g => ({ name: g.sha, score: g.score })),
+      clusters: clusters,
       analysis: {
         oldNodeCount: latest.details.n1,
         newNodeCount: latest.details.n2,
         editDistance: latest.details.d,
         rewardScore: latest.score,
         status: latest.score < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
-        cst: latest.details.cstStr || "Full History Analyzed."
-      },
-      clusters: clusters
+        cst: latest.details.cstStr
+      }
+    };
+
+    // 6. UPDATE THE CACHE
+    repoCache.set(cacheKey, {
+      latestSha: latestSha,
+      rawResults: combinedResults, // Save the raw array for future merges
+      payload: finalPayload        // Save the compiled payload for instant delivery
     });
+
+    res.json({ success: true, ...finalPayload });
 
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
