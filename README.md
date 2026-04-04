@@ -1,44 +1,37 @@
-# React + Vite
+# Project-Verified: Client Application
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Welcome to the frontend application for **Project-Verified** (GitPulse MVP). This client is a modern, high-performance React dashboard designed to visually monitor, analyze, and report on the integrity and authenticity of code repositories.
 
-Currently, two official plugins are available:
+## 🎯 Goal
+The primary goal of the frontend is to democratize complex semantic code analysis. By transforming raw algorithmic scores, Abstract Syntax Tree distances, and LLM summaries into an easy-to-read, visual dashboard, it helps educators, code reviewers, and managers instantly recognize whether a codebase was written steadily by a human or generated through anomalous "high-velocity dumps" (e.g., via AI or copy-pasting).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ⚙️ Process & Architecture
+1. **User Input:** The dashboard takes a GitHub repository URL via the user interface.
+2. **API Communication:** It communicates with the backend `server` to kick off the rigorous semantic parsing via the `/link-repo` endpoint.
+3. **Data Visualization:** Once the rich semantic payload is returned, the client processes:
+   - **Integrity Scores:** Shows if the repository is graded as "Authentic," "Standard," or "Suspect."
+   - **Evolution Pulse:** Maps out a timeline of commits relative to their tree edit distance scores using dynamic area charts.
+   - **Semantic Clusters:** Groups commits intelligently based on code injection speed.
+   - **AI Intelligence & Fingerprinting:** Renders the generative AI response (LLM Summary) that explains the core mechanics of the code and flags global open-source plagiarism matches.
+4. **Forensic Report Generation:** Acts as an immutable record generator by actively restructuring the DOM into a print-friendly format and exporting a standalone, high-fidelity PDF forensic report of the codebase.
 
-## React Compiler
+## 🛠️ Tools & Technologies Used
+- **[React 19](https://react.dev/):** The core declarative UI framework used for building the modular component architecture (e.g., `GitPulseMVP`, `ClassroomMatrix`).
+- **[Vite](https://vitejs.dev/):** Used as the lightning-fast build tool and development server, ensuring hot module replacement (HMR) and optimized frontend assets.
+- **[Recharts](https://recharts.org/):** A composable charting library built on React components utilized to render the beautiful, responsive "Evolution Pulse" graph.
+- **[Lucide-React](https://lucide.dev/):** Supplies clean, modern SVG iconography throughout the application to enhance visual signaling (like the Shield, Activity line, and Terminal).
+- **[html2pdf.js](https://ekoopmans.github.io/html2pdf.js/):** The engine driving the forensic PDF export. It captures the HTML snapshot, parses it to a canvas, and writes it directly to a downloadable PDF.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🚀 Getting Started
 
-## Expanding the ESLint configuration
+To run the frontend client locally:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+# Install dependencies
+npm install
 
-<!-- Next To Do -->
-The Plagiarism Matrix (Advanced Collusion Detection)
+# Start the Vite development server
+npm run dev
+```
 
-Private Repositories (GitHub OAuth)
-
-Dynamic Readme Badges (Student-facing Proof of Work)
-
-Option 1: The "Plagiarism Matrix" (Cross-Student AST Comparison)
-Right now, your engine compares a student to their past self to ensure they didn't just paste a massive block of code. But what if they copied it from the student sitting next to them?
-
-The Feature: Because you are already generating the mathematical Abstract Syntax Trees (ASTs) for every student in the cache, we can run the Zhang-Shasha algorithm between students.
-
-The Pitch: Even if Student A changes all the variable names, adds comments, and moves functions around to trick standard plagiarism checkers, their mathematical AST structure will still match Student B. You can add a button to the Cohort Matrix that says "Check for Collusion" and it will flag pairs of students whose structural code is suspiciously identical.
-
-Option 2: GitHub Classroom & Private Repo Support (OAuth)
-Currently, your tool works perfectly on public repositories. However, 99% of university computer science courses use "GitHub Classroom," which generates Private repositories for every student to prevent cheating.
-
-The Feature: We add a "Login with GitHub" button to the front page using GitHub OAuth.
-
-The Pitch: When the professor logs in, your Node.js backend gets a secure Access Token. This allows your engine to seamlessly parse the private codebases of their students without making the students' code public. This is a mandatory requirement for FERPA/academic privacy compliance.
-
-Option 3: The "Proof of Work" Dynamic Markdown Badge
-Instead of just making this a tool for professors to catch cheaters, we can turn it into a tool for students to prove their authenticity to future employers.
-
-The Feature: We create a new lightweight API route in your backend that returns an SVG image (like standard GitHub badges).
-
-The Pitch: A student can paste a line of markdown into their README.md (e.g., ![Project-Verified](http://your-server.com/api/badge/owner/repo)). Every time they push code, the badge dynamically updates to show their current Integrity Score (e.g., "Project-Verified: 0.96 Authentic" in a green shield). It turns your platform into an industry standard for resume verification.
+> **Note:** Make sure the backend algorithmic server is simultaneously running on port `5000` for the dashboard to receive project data!

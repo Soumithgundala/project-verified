@@ -1,9 +1,13 @@
 /* eslint-env node */
-require('dotenv').config();
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-const { Parser, Language } = require('web-tree-sitter');
+import 'dotenv/config.js';
+import express from 'express';
+import axios from 'axios';
+import cors from 'cors';
+import { Parser, Language } from 'web-tree-sitter';
+
+import { analyzeRepositoryAST as generateLLMSummary } from './utils/ai_wrapper.js';
+import { extractProjectFingerprint, huntGlobalClones } from './utils/astRadar.js';
+import repoCache from './utils/diskCache.js';
 
 const app = express();
 app.use(cors());
@@ -47,7 +51,7 @@ async function initGitPulseParser() {
     grammars.java = await Language.load('tree-sitter-java.wasm');
     grammars.c = await Language.load('tree-sitter-c.wasm');
 
-    console.log("Polyglot Engine Active: JS, Python, Java, and C grammars loaded.");
+    // console.log("Polyglot Engine Active: JS, Python, Java, and C grammars loaded.");
   } catch (err) {
     console.error("Failed to load one or more WASM grammars. Check file paths.", err);
   }
@@ -98,11 +102,11 @@ function splitDiff(patch) {
 // ... (Keep your existing imports, Tree-Sitter init, and helper functions)
 
 // =================================================================
-// THE INTELLIGENT CACHE
+// THE INTELLIGENT CACHE  (disk-backed — survives nodemon restarts)
 // Key: "owner/repo"
 // Value: { latestSha: "abc123", rawResults: [...], payload: {...} }
+// Stored at: server/.cache/repoCache.json
 // =================================================================
-const repoCache = new Map();
 
 app.post('/api/link-repo', async (req, res) => {
   const { url } = req.body;
@@ -229,12 +233,38 @@ app.post('/api/link-repo', async (req, res) => {
 
     const latest = historyLog[0] || { details: { n1: 0, n2: 0, d: 0, cstStr: "" }, score: 1 };
 
+    // 3. THE NEW INTELLIGENCE LAYER (Runs on EVERY repo now!)
+    // =================================================================
+    // console.log(`🧠 Extracting Fingerprint and generating LLM Summary for ${cacheKey}...`);
+
+    let globalOriginality = null;
+    let llmSummary = null;
+
+    // We fetch the heaviest file and the 50-character anchor string
+    const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
+
+    if (fingerprint) {
+      // Step A: Send to LLM (Gemini -> OpenAI Fallback) for the semantic summary
+      llmSummary = await generateLLMSummary(fingerprint.fileName, fingerprint.rawCode);
+
+      // Step B: Search GitHub globally for the Anchor String to catch exact clones
+      globalOriginality = await huntGlobalClones(fingerprint.anchorString, owner, repo, headers);
+    } else {
+      llmSummary = { overall_logic_summary: "No substantial logic files found to summarize.", key_patterns: [], likely_source: "Unknown" };
+      globalOriginality = { status: 'Original', matches: [] };
+    }
+
     // 5. The Final Payload
     const finalPayload = {
       repoInfo: { owner, repo },
       commits: historyLog,
       pulseData: graphData.map(g => ({ name: g.sha, score: g.score })),
       clusters: clusters,
+      // The frontend will use this new object to display the summary and clone status
+      intelligence: {
+        globalOriginality: globalOriginality,
+        llmSummary: llmSummary
+      },
       analysis: {
         oldNodeCount: latest.details.n1,
         newNodeCount: latest.details.n2,

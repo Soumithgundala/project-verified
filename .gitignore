@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Disk cache — contains raw GitHub source code, do not commit
+server/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -205,10 +205,109 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                 </div>
               </div>
 
+              <div className="card" style={{ gridColumn: 'span 12' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#0f172a' }}>
+                  <Cpu size={20} style={{ color: '#4f46e5' }} /> AI Semantic Analysis Summary
+                </h3>
+                <div style={{ backgroundColor: '#f8fafc', padding: '1.5rem', borderRadius: '0.75rem', border: '1px solid #e2e8f0', whiteSpace: 'pre-wrap', lineHeight: '1.6', color: '#334155' }}>
+                  {typeof data.intelligence?.llmSummary === 'string' ? data.intelligence.llmSummary : data.intelligence?.llmSummary?.overall_logic_summary || "No semantic summary generated for this repository."}
+                </div>
+              </div>
+
             </div>
           </div>
 
           {/* LAYOUT 2: THE FORENSIC PDF TEMPLATE */}
+          {/* PDF: INTELLIGENCE SUMMARY BLOCK */}
+          {/* PDF: INTELLIGENCE SUMMARY BLOCK */}
+          {data.intelligence && (
+            <div style={{ marginBottom: '40px', pageBreakInside: 'avoid' }}>
+
+              {/* Global Clone Status */}
+              <div style={{ padding: '15px', borderRadius: '8px', marginBottom: '15px', borderLeft: '6px solid', borderColor: data.intelligence.globalOriginality.status === 'Original' ? '#10b981' : '#f43f5e', backgroundColor: '#f8fafc' }}>
+                <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', color: '#0f172a' }}>
+                  Global Fingerprint Check: <span style={{ color: data.intelligence.globalOriginality.status === 'Original' ? '#10b981' : '#f43f5e' }}>{data.intelligence.globalOriginality.status}</span>
+                </h3>
+                {data.intelligence.globalOriginality.matches?.length > 0 && (
+                  <div style={{ marginTop: '10px' }}>
+                    <p style={{ margin: '0 0 5px 0', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>MATCHED SOURCES:</p>
+                    {data.intelligence.globalOriginality.matches.map((url, idx) => (
+                      <p key={idx} style={{ margin: 0, fontSize: '12px', fontFamily: 'monospace', color: '#4f46e5' }}>{url}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* LLM Semantic Summary */}
+              {data.intelligence.llmSummary && (
+                <div style={{ padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
+                  <h3 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>AI Semantic Summary</h3>
+                  <p style={{ margin: '0 0 15px 0', fontSize: '14px', lineHeight: '1.6', color: '#334155' }}>
+                    {data.intelligence.llmSummary.overall_logic_summary}
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '20px' }}>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 5px 0', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>KEY PATTERNS DETECTED:</p>
+                      <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: '#334155' }}>
+                        {data.intelligence.llmSummary.key_patterns?.map((pattern, idx) => (
+                          <li key={idx}>{pattern}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 5px 0', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>LIKELY SOURCE:</p>
+                      <p style={{ margin: 0, fontSize: '13px', color: '#334155', fontWeight: 'bold' }}>{data.intelligence.llmSummary.likely_source}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {data.intelligence && (
+            <div style={{ marginBottom: '40px', pageBreakInside: 'avoid' }}>
+
+              {/* Global Clone Status */}
+              <div style={{ padding: '15px', borderRadius: '8px', marginBottom: '15px', borderLeft: '6px solid', borderColor: data.intelligence.globalOriginality.status === 'Original' ? '#10b981' : '#f43f5e', backgroundColor: '#f8fafc' }}>
+                <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', color: '#0f172a' }}>
+                  Global Fingerprint Check: <span style={{ color: data.intelligence.globalOriginality.status === 'Original' ? '#10b981' : '#f43f5e' }}>{data.intelligence.globalOriginality.status}</span>
+                </h3>
+                {data.intelligence.globalOriginality.matches?.length > 0 && (
+                  <div style={{ marginTop: '10px' }}>
+                    <p style={{ margin: '0 0 5px 0', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>MATCHED SOURCES:</p>
+                    {data.intelligence.globalOriginality.matches.map((url, idx) => (
+                      <p key={idx} style={{ margin: 0, fontSize: '12px', fontFamily: 'monospace', color: '#4f46e5' }}>{url}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* LLM Semantic Summary */}
+              {data.intelligence.llmSummary && (
+                <div style={{ padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
+                  <h3 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>AI Semantic Summary</h3>
+                  <p style={{ margin: '0 0 15px 0', fontSize: '14px', lineHeight: '1.6', color: '#334155' }}>
+                    {data.intelligence.llmSummary.overall_logic_summary}
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '20px' }}>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 5px 0', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>KEY PATTERNS DETECTED:</p>
+                      <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: '#334155' }}>
+                        {data.intelligence.llmSummary.key_patterns?.map((pattern, idx) => (
+                          <li key={idx}>{pattern}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ margin: '0 0 5px 0', fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>LIKELY SOURCE:</p>
+                      <p style={{ margin: 0, fontSize: '13px', color: '#334155', fontWeight: 'bold' }}>{data.intelligence.llmSummary.likely_source}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: isPrinting ? 'block' : 'none', width: '900px', margin: '0 auto', background: 'white', padding: '20px', color: 'black', fontFamily: 'sans-serif' }}>
             <div style={{ borderBottom: '2px solid #e2e8f0', paddingBottom: '20px', marginBottom: '30px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
               <div>
@@ -323,6 +422,13 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Raw CST Fragment</h3>
               <div style={{ backgroundColor: '#0f172a', color: '#10b981', padding: '20px', borderRadius: '8px', fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.6', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 {data.analysis.cst}
+              </div>
+            </div>
+
+            <div style={{ pageBreakInside: 'avoid', marginBottom: '40px' }}>
+              <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>AI Semantic Analysis Summary</h3>
+              <div style={{ backgroundColor: '#f8fafc', color: '#334155', padding: '20px', borderRadius: '8px', borderLeft: '4px solid #4f46e5', fontSize: '13px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                {typeof data.intelligence?.llmSummary === 'string' ? data.intelligence.llmSummary : data.intelligence?.llmSummary?.overall_logic_summary || "No semantic summary generated for this repository."}
               </div>
             </div>
 
