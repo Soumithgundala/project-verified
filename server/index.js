@@ -103,10 +103,20 @@ function splitDiff(patch) {
 
 // =================================================================
 // THE INTELLIGENT CACHE  (disk-backed — survives nodemon restarts)
-// Key: "owner/repo"
-// Value: { latestSha: "abc123", rawResults: [...], payload: {...} }
 // Stored at: server/.cache/repoCache.json
+//
+// Each pipeline stage has its OWN version number.
+// Only the stage whose version changed re-runs — everything else is served
+// straight from cache. To invalidate a specific stage, bump ONLY its number:
+//   MODULE_VERSIONS.commits     — re-parse AST / re-score every commit
+//   MODULE_VERSIONS.llmSummary  — re-run LLM prompt on the repo fingerprint
+//   MODULE_VERSIONS.originality — re-run GitHub global clone search
 // =================================================================
+const MODULE_VERSIONS = {
+  commits:     1,  // bump if: scoring formula, AST logic, or clustering changes
+  llmSummary:  1,  // bump if: LLM prompt template or model selection changes
+  originality: 2,  // v2: added pushed:<date> filter to huntGlobalClones
+};
 
 app.post('/api/link-repo', async (req, res) => {
   const { url } = req.body;
@@ -115,171 +125,165 @@ app.post('/api/link-repo', async (req, res) => {
     const { owner, repo } = parseGithubUrl(url);
     const cacheKey = `${owner}/${repo}`;
 
-    // 1. Fetch the latest commits from GitHub (Lightweight API call)
+    // ── Lightweight call: just enough to detect new commits ───────────────
     const commitsResponse = await axios.get(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?per_page=30`,
       { headers }
     );
     const fetchedCommits = commitsResponse.data;
+    if (!fetchedCommits?.length) throw new Error("No commits found in this repository.");
 
-    if (!fetchedCommits || fetchedCommits.length === 0) {
-      throw new Error("No commits found in this repository.");
-    }
+    const latestSha   = fetchedCommits[0].sha;
+    const cached      = repoCache.get(cacheKey);
+    const shaChanged  = !cached || cached.latestSha !== latestSha;
 
-    const latestSha = fetchedCommits[0].sha;
-    const cachedData = repoCache.get(cacheKey);
+    // ── MODULE 1: COMMITS (AST parse → score → merge) ─────────────────────
+    // Re-runs when: new commits arrived OR commits-module logic was bumped
+    const commitsVersionOk = cached?.commits?.version === MODULE_VERSIONS.commits;
+    const needsCommitsRun  = shaChanged || !commitsVersionOk;
 
-    // ==========================================
-    // SCENARIO A: EXACT CACHE HIT (No new commits)
-    // ==========================================
-    if (cachedData && cachedData.latestSha === latestSha) {
-      console.log(`🟢 [CACHE HIT] Instant load for ${cacheKey} (No new commits)`);
-      return res.json({ success: true, ...cachedData.payload });
-    }
+    let combinedResults;
 
-    // ==========================================
-    // SCENARIO B: DELTA UPDATE OR CACHE MISS
-    // ==========================================
-    let newCommitsToProcess = [];
+    if (!needsCommitsRun) {
+      console.log(`🟢 [CACHE] Commits module valid for ${cacheKey}`);
+      combinedResults = cached.commits.rawResults;
 
-    if (cachedData) {
-      console.log(`🟡 [DELTA UPDATE] New commits detected for ${cacheKey}. Slicing new data...`);
-      // Find only the commits that happened AFTER our last cached SHA
-      for (const c of fetchedCommits) {
-        if (c.sha === cachedData.latestSha) break; // Stop when we hit the known commit
-        newCommitsToProcess.push(c);
-      }
     } else {
-      console.log(`🔴 [CACHE MISS] First time processing ${cacheKey}. Running full history...`);
-      newCommitsToProcess = fetchedCommits;
-    }
+      const reason = !cached ? 'first run' : shaChanged ? 'new commits' : 'logic version bumped';
+      console.log(`🔄 [RERUN] Commits module for ${cacheKey} (${reason})`);
 
-    // 2. Process ONLY the new commits through the WebAssembly Parser
-    const newPulseDataResults = await Promise.all(newCommitsToProcess.map(async (c) => {
-      try {
-        const detail = await axios.get(
-          `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${c.sha}`,
-          { headers }
-        );
-
-        const validExtensions = Object.keys(extensionMap);
-        const sourceFile = detail.data.files.find(f =>
-          validExtensions.some(ext => f.filename?.endsWith(ext))
-        );
-
-        const rawHunk = sourceFile?.patch || "";
-        let n1 = 0, n2 = 0, d = 0, r = 1;
-        let cstStr = "No code patch found.";
-
-        if (parser && rawHunk && sourceFile) {
-          const fileExt = validExtensions.find(ext => sourceFile.filename.endsWith(ext));
-          const langKey = extensionMap[fileExt];
-          const targetGrammar = grammars[langKey];
-
-          if (targetGrammar) {
-            parser.setLanguage(targetGrammar);
-            const { oldCode, newCode } = splitDiff(rawHunk);
-            const treeOld = parser.parse(oldCode);
-            const treeNew = parser.parse(newCode);
-
-            n1 = treeOld.rootNode.descendantCount;
-            n2 = treeNew.rootNode.descendantCount;
-            d = Math.abs(n2 - n1);
-            r = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
-            cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
-          }
+      // Delta: when SHA changed and we have prior data, only process truly new commits
+      let toProcess = fetchedCommits; // default: full reprocess (version bump or first run)
+      if (shaChanged && cached?.commits?.rawResults) {
+        toProcess = [];
+        for (const c of fetchedCommits) {
+          if (c.sha === cached.latestSha) break;
+          toProcess.push(c);
         }
-
-        return {
-          sha: c.sha.substring(0, 7),
-          score: parseFloat(r.toFixed(2)),
-          date: c.commit.author.date,
-          message: c.commit.message,
-          author: c.commit.author.name,
-          details: { n1, n2, d, cstStr }
-        };
-      } catch (err) {
-        return null; // Skip if GitHub API fails on a specific file
+        console.log(`🟡 [DELTA] ${toProcess.length} new commit(s) to process for ${cacheKey}`);
       }
-    }));
 
-    const validNewResults = newPulseDataResults.filter(r => r !== null);
+      const newProcessed = await Promise.all(toProcess.map(async (c) => {
+        try {
+          const detail = await axios.get(
+            `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits/${c.sha}`,
+            { headers }
+          );
+          const validExtensions = Object.keys(extensionMap);
+          const sourceFile = detail.data.files.find(f =>
+            validExtensions.some(ext => f.filename?.endsWith(ext))
+          );
+          const rawHunk = sourceFile?.patch || "";
+          let n1 = 0, n2 = 0, d = 0, r = 1, cstStr = "No code patch found.";
 
-    // 3. MERGE: Combine newly parsed commits with previously cached commits
-    let combinedResults = [];
-    if (cachedData) {
-      combinedResults = [...validNewResults, ...cachedData.rawResults];
-      // Cap the history at 30 to prevent memory leaks over time
-      combinedResults = combinedResults.slice(0, 30);
-    } else {
-      combinedResults = validNewResults;
+          if (parser && rawHunk && sourceFile) {
+            const fileExt     = validExtensions.find(ext => sourceFile.filename.endsWith(ext));
+            const targetGrammar = grammars[extensionMap[fileExt]];
+            if (targetGrammar) {
+              parser.setLanguage(targetGrammar);
+              const { oldCode, newCode } = splitDiff(rawHunk);
+              const treeOld = parser.parse(oldCode);
+              const treeNew = parser.parse(newCode);
+              n1 = treeOld.rootNode.descendantCount;
+              n2 = treeNew.rootNode.descendantCount;
+              d  = Math.abs(n2 - n1);
+              r  = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
+              cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+            }
+          }
+          return {
+            sha: c.sha.substring(0, 7), score: parseFloat(r.toFixed(2)),
+            date: c.commit.author.date,  message: c.commit.message,
+            author: c.commit.author.name, details: { n1, n2, d, cstStr }
+          };
+        } catch { return null; }
+      }));
+
+      const validNew = newProcessed.filter(Boolean);
+      // Merge with prior cache only on a delta update (new commits arrived)
+      if (shaChanged && cached?.commits?.rawResults) {
+        combinedResults = [...validNew, ...cached.commits.rawResults].slice(0, 30);
+      } else {
+        combinedResults = validNew;
+      }
     }
 
-    // 4. RECALCULATE: Sort and Cluster the combined dataset
-    const graphData = [...combinedResults].sort((a, b) => new Date(a.date) - new Date(b.date));
+    // ── Assemble graphs & clusters from combinedResults (always cheap) ──────
+    const graphData  = [...combinedResults].sort((a, b) => new Date(a.date) - new Date(b.date));
     const historyLog = [...combinedResults].sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const clusters = {
-      authentic: { label: "Steady Refactoring", color: "emerald", commits: [] },
-      standard: { label: "Active Development", color: "blue", commits: [] },
-      suspect: { label: "High-Velocity Dumps", color: "rose", commits: [] }
+      authentic: { label: "Steady Refactoring",  color: "emerald", commits: [] },
+      standard:  { label: "Active Development",  color: "blue",    commits: [] },
+      suspect:   { label: "High-Velocity Dumps", color: "rose",    commits: [] },
     };
-
     combinedResults.forEach(item => {
-      if (item.score >= 0.85) clusters.authentic.commits.push(item);
+      if      (item.score >= 0.85) clusters.authentic.commits.push(item);
       else if (item.score >= 0.45) clusters.standard.commits.push(item);
-      else clusters.suspect.commits.push(item);
+      else                         clusters.suspect.commits.push(item);
     });
-
     const latest = historyLog[0] || { details: { n1: 0, n2: 0, d: 0, cstStr: "" }, score: 1 };
 
-    // 3. THE NEW INTELLIGENCE LAYER (Runs on EVERY repo now!)
-    // =================================================================
-    // console.log(`🧠 Extracting Fingerprint and generating LLM Summary for ${cacheKey}...`);
+    // ── MODULE 2 & 3: INTELLIGENCE ─────────────────────────────────────────
+    // Each sub-module checks its own version independently.
+    // The fingerprint (heavy GitHub API call) is fetched once if EITHER needs it.
+    const llmVersionOk  = !shaChanged && cached?.llmSummary?.version  === MODULE_VERSIONS.llmSummary;
+    const origVersionOk = !shaChanged && cached?.originality?.version === MODULE_VERSIONS.originality;
+    const needsLLMRun   = !llmVersionOk;
+    const needsOrigRun  = !origVersionOk;
 
-    let globalOriginality = null;
-    let llmSummary = null;
+    let llmSummary        = cached?.llmSummary?.data  ?? null;
+    let globalOriginality = cached?.originality?.data ?? null;
 
-    // We fetch the heaviest file and the 50-character anchor string
-    const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
+    if (needsLLMRun || needsOrigRun) {
+      // Fetch fingerprint once — shared by both sub-modules if both need it
+      const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
 
-    if (fingerprint) {
-      // Step A: Send to LLM (Gemini -> OpenAI Fallback) for the semantic summary
-      llmSummary = await generateLLMSummary(fingerprint.fileName, fingerprint.rawCode);
+      if (needsLLMRun) {
+        console.log(`🔄 [RERUN] LLM Summary module for ${cacheKey}`);
+        llmSummary = fingerprint
+          ? await generateLLMSummary(fingerprint.fileName, fingerprint.rawCode)
+          : { overall_logic_summary: "No substantial logic files found.", key_patterns: [], likely_source: "Unknown" };
+      } else {
+        console.log(`🟢 [CACHE] LLM Summary module valid for ${cacheKey}`);
+      }
 
-      // Step B: Search GitHub globally for the Anchor String to catch exact clones
-      globalOriginality = await huntGlobalClones(fingerprint.anchorString, owner, repo, headers);
+      if (needsOrigRun) {
+        console.log(`🔄 [RERUN] Originality module for ${cacheKey}`);
+        const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
+        globalOriginality = fingerprint
+          ? await huntGlobalClones(fingerprint.anchorString, owner, repo, headers, firstCommitDate)
+          : { status: 'Original', matches: [] };
+      } else {
+        console.log(`🟢 [CACHE] Originality module valid for ${cacheKey}`);
+      }
     } else {
-      llmSummary = { overall_logic_summary: "No substantial logic files found to summarize.", key_patterns: [], likely_source: "Unknown" };
-      globalOriginality = { status: 'Original', matches: [] };
+      console.log(`🟢 [CACHE] Intelligence modules both valid for ${cacheKey}`);
     }
 
-    // 5. The Final Payload
+    // ── Assemble final payload ─────────────────────────────────────────────
     const finalPayload = {
-      repoInfo: { owner, repo },
-      commits: historyLog,
+      repoInfo:  { owner, repo },
+      commits:   historyLog,
       pulseData: graphData.map(g => ({ name: g.sha, score: g.score })),
-      clusters: clusters,
-      // The frontend will use this new object to display the summary and clone status
-      intelligence: {
-        globalOriginality: globalOriginality,
-        llmSummary: llmSummary
-      },
+      clusters,
+      intelligence: { globalOriginality, llmSummary },
       analysis: {
         oldNodeCount: latest.details.n1,
         newNodeCount: latest.details.n2,
         editDistance: latest.details.d,
-        rewardScore: latest.score,
+        rewardScore:  latest.score,
         status: latest.score < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
         cst: latest.details.cstStr
       }
     };
 
-    // 6. UPDATE THE CACHE
+    // ── Persist cache with per-module version stamps ───────────────────────
     repoCache.set(cacheKey, {
-      latestSha: latestSha,
-      rawResults: combinedResults, // Save the raw array for future merges
-      payload: finalPayload        // Save the compiled payload for instant delivery
+      latestSha,
+      commits:     { version: MODULE_VERSIONS.commits,     rawResults: combinedResults },
+      llmSummary:  { version: MODULE_VERSIONS.llmSummary,  data: llmSummary },
+      originality: { version: MODULE_VERSIONS.originality, data: globalOriginality },
     });
 
     res.json({ success: true, ...finalPayload });
