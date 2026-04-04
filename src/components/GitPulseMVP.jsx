@@ -267,7 +267,7 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
           {data.intelligence && (
             <div style={{ marginBottom: '40px', pageBreakInside: 'avoid' }}>
 
-              {/* Global Clone Status */}
+              {/* Global Clone Status
               <div style={{ padding: '15px', borderRadius: '8px', marginBottom: '15px', borderLeft: '6px solid', borderColor: data.intelligence.globalOriginality.status === 'Original' ? '#10b981' : '#f43f5e', backgroundColor: '#f8fafc' }}>
                 <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', color: '#0f172a' }}>
                   Global Fingerprint Check: <span style={{ color: data.intelligence.globalOriginality.status === 'Original' ? '#10b981' : '#f43f5e' }}>{data.intelligence.globalOriginality.status}</span>
@@ -280,10 +280,10 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                     ))}
                   </div>
                 )}
-              </div>
+              </div> */}
 
               {/* LLM Semantic Summary */}
-              {data.intelligence.llmSummary && (
+              {/* {data.intelligence.llmSummary && (
                 <div style={{ padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
                   <h3 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>AI Semantic Summary</h3>
                   <p style={{ margin: '0 0 15px 0', fontSize: '14px', lineHeight: '1.6', color: '#334155' }}>
@@ -305,7 +305,7 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                     </div>
                   </div>
                 </div>
-              )}
+              )} */}
             </div>
           )}
           <div style={{ display: isPrinting ? 'block' : 'none', width: '900px', margin: '0 auto', background: 'white', padding: '20px', color: 'black', fontFamily: 'sans-serif' }}>
