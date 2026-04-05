@@ -2,6 +2,43 @@
 
 Welcome to the backend engine for **Project-Verified**. This Node.js server acts as the heavy-lifting computational core of the project. It handles raw codebase scraping, structural AST (Abstract Syntax Tree) generation, algorithm-based code distancing, and integrates with multiple LLMs to semantically verify human code authorship.
 
+
+Student submits repo
+        │
+        ▼
+Parse AST (already done for scoring)
+        │
+        ▼
+generateStructuralHash(tree.rootNode)
+        │
+        ▼
+┌───────────────────────────────┐
+│  astHashDb.lookup(hash)       │
+│  (local JSON file, ~5ms)      │
+└───────────────────────────────┘
+     Hit? ──YES──► Flag: "Local Clone Detected"  (cost: $0)
+        │
+        NO
+        │
+        ▼
+huntGlobalClones (GitHub Search API)
+        │
+     Hit? ──YES──► Download matched file
+                        │
+                        ▼
+                   Parse matched file AST
+                        │
+                        ▼
+                   astHashDb.save(hash, url)  ◄── "The Genius Move"
+                        │
+                        ▼
+                   Flag: "Direct Clone Detected"
+        │
+        NO
+        │
+        ▼
+Flag: "Original"
+
 ## 🏗️ Complete Architecture Diagram
 
 ```mermaid

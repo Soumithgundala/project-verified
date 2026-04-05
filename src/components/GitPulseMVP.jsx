@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { Activity, ShieldCheck, CheckCircle, Terminal, GitCommit, Fingerprint, Layers, Cpu, ArrowLeft, Download, HelpCircle, X } from 'lucide-react';
+import { Activity, ShieldCheck, ShieldAlert, CheckCircle, Users, Terminal, GitCommit, Fingerprint, Layers, Cpu, ArrowLeft, Download, HelpCircle, X } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import './GitPulseMVP.css';
 
@@ -172,7 +172,12 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                   <div className="cluster-list scrollable">
                     {group.commits.map((c, i) => (
                       <div key={i} className="commit-mini-row">
-                        <span className="sha">{c.sha}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                          <span className="sha" style={{ fontSize: '0.8rem', fontWeight: '600', color: '#1e293b', fontFamily: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
+                            {c.message ? c.message.split('\n')[0].substring(0, 35) + (c.message.length > 35 ? '…' : '') : c.sha}
+                          </span>
+                          <span style={{ fontSize: '0.65rem', fontFamily: 'monospace', color: '#94a3b8' }}>{c.sha}</span>
+                        </div>
                         <span className="score">r: {c.score}</span>
                       </div>
                     ))}
@@ -198,6 +203,40 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                 </div>
               </div>
 
+              {/* --- CONTRIBUTOR FORENSICS CARD --- */}
+              {data.authorStats && data.authorStats.length > 0 && (
+                <div className="card log-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid #f1f5f9' }}>
+                    <h3 className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Users size={20} /> Contributor Forensics
+                    </h3>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 'bold', backgroundColor: '#f1f5f9', color: '#64748b', padding: '2px 10px', borderRadius: '999px' }}>
+                      {data.authorStats.length} Unique Author{data.authorStats.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="scrollable" style={{ maxHeight: '250px' }}>
+                    {data.authorStats.map((author, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem', marginBottom: '0.5rem', borderRadius: '0.5rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                        <div>
+                          <p style={{ margin: 0, fontWeight: 'bold', color: '#1e293b', fontSize: '0.875rem' }}>{author.name}</p>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: '#64748b' }}>{author.commitCount} verified commits</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <p style={{ margin: '0 0 4px 0', fontSize: '0.65rem', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Avg Score</p>
+                          <span style={{
+                            padding: '3px 10px', borderRadius: '6px', fontSize: '0.875rem', fontWeight: '900',
+                            backgroundColor: author.averageScore >= 0.85 ? '#d1fae5' : author.averageScore >= 0.45 ? '#dbeafe' : '#ffe4e6',
+                            color:           author.averageScore >= 0.85 ? '#065f46' : author.averageScore >= 0.45 ? '#1e40af' : '#9f1239'
+                          }}>
+                            {author.averageScore.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="card terminal-card">
                 <h3 className="terminal-title"><Terminal size={16} /> Raw CST Fragment</h3>
                 <div className="terminal-content scrollable">
@@ -205,14 +244,73 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                 </div>
               </div>
 
-              <div className="card" style={{ gridColumn: 'span 12' }}>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#0f172a' }}>
-                  <Cpu size={20} style={{ color: '#4f46e5' }} /> AI Semantic Analysis Summary
-                </h3>
-                <div style={{ backgroundColor: '#f8fafc', padding: '1.5rem', borderRadius: '0.75rem', border: '1px solid #e2e8f0', whiteSpace: 'pre-wrap', lineHeight: '1.6', color: '#334155' }}>
-                  {typeof data.intelligence?.llmSummary === 'string' ? data.intelligence.llmSummary : data.intelligence?.llmSummary?.overall_logic_summary || "No semantic summary generated for this repository."}
+              {/* --- SEMANTIC INTELLIGENCE DASHBOARD --- */}
+              {data.intelligence && (
+                <div className="card" style={{ gridColumn: 'span 12', borderTop: '4px solid #4f46e5' }}>
+                  <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+
+                    {/* LEFT COLUMN: Global Originality & Two-Strike Status */}
+                    <div style={{ flex: '1 1 300px' }}>
+                      <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
+                        <Fingerprint size={20} style={{ color: '#4f46e5' }} /> Global Origin Check
+                      </h3>
+
+                      <div style={{
+                        marginTop: '1rem', padding: '1.25rem', borderRadius: '0.75rem',
+                        backgroundColor: data.intelligence.globalOriginality?.status === 'Original' ? '#ecfdf5' :
+                                         data.intelligence.globalOriginality?.status?.includes('Clone') ? '#fff1f2' : '#eff6ff',
+                        border: '1px solid',
+                        borderColor: data.intelligence.globalOriginality?.status === 'Original' ? '#a7f3d0' :
+                                     data.intelligence.globalOriginality?.status?.includes('Clone') ? '#fecdd3' : '#bfdbfe'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                          {data.intelligence.globalOriginality?.status === 'Original'
+                            ? <CheckCircle size={24} style={{ color: '#059669' }} />
+                            : <ShieldAlert size={24} style={{ color: '#e11d48' }} />}
+                          <h4 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 'bold', color: '#0f172a' }}>
+                            {data.intelligence.globalOriginality?.status || 'Pending'}
+                          </h4>
+                        </div>
+
+                        {/* AST Showdown Score */}
+                        {data.intelligence.globalOriginality?.similarityScore && (
+                          <div style={{ marginTop: '1rem', backgroundColor: '#ffffff', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.875rem', fontWeight: 'bold', color: '#64748b' }}>AST Structural Match:</span>
+                            <span style={{ fontSize: '1.25rem', fontWeight: '900', color: '#e11d48' }}>{data.intelligence.globalOriginality.similarityScore}</span>
+                          </div>
+                        )}
+
+                        {/* Matched Source URLs */}
+                        {data.intelligence.globalOriginality?.matches?.length > 0 && (
+                          <div style={{ marginTop: '1rem' }}>
+                            <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Identified Source:</p>
+                            {data.intelligence.globalOriginality.matches.map((url, idx) => (
+                              <a key={idx} href={url} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: '0.875rem', color: '#4f46e5', fontFamily: 'monospace', textDecoration: 'underline', marginBottom: '0.25rem', wordBreak: 'break-all' }}>
+                                {url}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* RIGHT COLUMN: LLM Markdown Summary */}
+                    <div style={{ flex: '2 1 400px' }}>
+                      <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
+                        <Activity size={20} style={{ color: '#4f46e5' }} /> AI Semantic Breakdown
+                      </h3>
+                      <div className="scrollable" style={{ marginTop: '1rem', maxHeight: '300px', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '0.75rem', border: '1px solid #e2e8f0' }}>
+                        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.875rem', color: '#334155', lineHeight: '1.6' }}>
+                          {typeof data.intelligence.llmSummary === 'string'
+                            ? data.intelligence.llmSummary
+                            : data.intelligence.llmSummary?.overall_logic_summary || "No semantic summary available."}
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
                 </div>
-              </div>
+              )}
 
             </div>
           </div>
@@ -339,6 +437,46 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
               </div>
             </div>
 
+            {/* --- PDF: INTELLIGENCE BLOCK --- */}
+            {data.intelligence && (
+              <div style={{ display: 'flex', gap: '20px', marginBottom: '40px', pageBreakInside: 'avoid' }}>
+
+                {/* PDF: Global Clone Status */}
+                <div style={{ flex: '1', padding: '20px', borderRadius: '12px', borderLeft: '6px solid', borderColor: data.intelligence.globalOriginality?.status === 'Original' ? '#10b981' : '#e11d48', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Origin Verification</p>
+                  <h3 style={{ margin: '5px 0 15px 0', fontSize: '20px', color: data.intelligence.globalOriginality?.status === 'Original' ? '#047857' : '#be123c' }}>
+                    {data.intelligence.globalOriginality?.status || 'Pending'}
+                  </h3>
+
+                  {data.intelligence.globalOriginality?.similarityScore && (
+                    <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#ffffff', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>AST STRUCTURAL SIMILARITY:</p>
+                      <p style={{ margin: 0, fontSize: '24px', fontWeight: '900', color: '#e11d48' }}>{data.intelligence.globalOriginality.similarityScore}</p>
+                    </div>
+                  )}
+
+                  {data.intelligence.globalOriginality?.matches?.length > 0 && (
+                    <div>
+                      <p style={{ margin: '0 0 5px 0', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Matched Sources:</p>
+                      {data.intelligence.globalOriginality.matches.map((url, idx) => (
+                        <p key={idx} style={{ margin: '0 0 4px 0', fontSize: '11px', fontFamily: 'monospace', color: '#4f46e5', wordBreak: 'break-all' }}>{url}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* PDF: LLM Summary */}
+                <div style={{ flex: '2', padding: '20px', borderRadius: '12px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0' }}>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '10px' }}>Semantic Code Analysis</p>
+                  <div style={{ fontSize: '12px', color: '#334155', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                    {typeof data.intelligence.llmSummary === 'string'
+                      ? data.intelligence.llmSummary
+                      : data.intelligence.llmSummary?.overall_logic_summary || "No semantic summary available."}
+                  </div>
+                </div>
+
+              </div>
+            )}
             <div style={{ marginBottom: '40px' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Evolution Pulse</h3>
               <div style={{ height: '250px', width: '100%' }}>
@@ -358,9 +496,14 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                 <h3 style={{ color: '#be123c', marginTop: 0, fontSize: '18px' }}>⚠️ High-Velocity Dumps Detected ({data.clusters.suspect.commits.length})</h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
                   {data.clusters.suspect.commits.map(c => (
-                    <div key={c.sha} style={{ flex: '1 1 calc(50% - 15px)', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #ffe4e6', paddingBottom: '8px' }}>
-                      <span style={{ fontFamily: 'monospace', color: '#be123c', fontWeight: 'bold' }}>{c.sha}</span>
-                      <span style={{ fontWeight: 'bold', color: '#9f1239' }}>r: {c.score}</span>
+                    <div key={c.sha} style={{ flex: '1 1 calc(50% - 15px)', display: 'flex', flexDirection: 'column', borderBottom: '1px solid #ffe4e6', paddingBottom: '8px', gap: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ fontWeight: 'bold', color: '#be123c', fontSize: '13px', flex: 1, marginRight: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {c.message ? c.message.split('\n')[0].substring(0, 45) + (c.message.length > 45 ? '…' : '') : c.sha}
+                        </span>
+                        <span style={{ fontWeight: 'bold', color: '#9f1239', flexShrink: 0 }}>r: {c.score}</span>
+                      </div>
+                      <span style={{ fontFamily: 'monospace', color: '#fca5a5', fontSize: '11px' }}>{c.sha}</span>
                     </div>
                   ))}
                 </div>
@@ -380,9 +523,14 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
                         {group.commits.length > 0 ? group.commits.map((c, i) => (
-                          <div key={i} style={{ flex: '0 0 calc(33.333% - 15px)', boxSizing: 'border-box', display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>
-                            <span style={{ fontFamily: 'monospace', color: '#64748b' }}>{c.sha}</span>
-                            <span style={{ color: '#4f46e5', fontWeight: 'bold' }}>r: {c.score}</span>
+                          <div key={i} style={{ flex: '0 0 calc(50% - 15px)', boxSizing: 'border-box', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                            <div style={{ flex: 1, overflow: 'hidden' }}>
+                              <p style={{ margin: 0, fontSize: '12px', color: '#0f172a', fontWeight: '600', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {c.message ? c.message.split('\n')[0].substring(0, 40) + (c.message.length > 40 ? '…' : '') : c.sha}
+                              </p>
+                              <p style={{ margin: 0, fontSize: '10px', fontFamily: 'monospace', color: '#94a3b8' }}>{c.sha}</p>
+                            </div>
+                            <span style={{ color: '#4f46e5', fontWeight: 'bold', fontSize: '12px', flexShrink: 0 }}>r: {c.score}</span>
                           </div>
                         )) : (
                           <p style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>No commits in cluster</p>
@@ -393,6 +541,31 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                 })}
               </div>
             </div>
+
+            {/* --- PDF: CONTRIBUTOR BREAKDOWN --- */}
+            {data.authorStats && data.authorStats.length > 0 && (
+              <div style={{ marginBottom: '40px', pageBreakInside: 'avoid' }}>
+                <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+                  Contributor Authentication ({data.authorStats.length} Detected)
+                </h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+                  {data.authorStats.map((author, i) => (
+                    <div key={i} style={{ flex: '1 1 calc(50% - 15px)', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <p style={{ margin: '0 0 5px 0', fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>{author.name}</p>
+                        <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>{author.commitCount} Total Commits</p>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ margin: '0 0 4px 0', fontSize: '10px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Avg Integrity</p>
+                        <p style={{ margin: 0, fontSize: '20px', fontWeight: '900', color: author.averageScore >= 0.85 ? '#10b981' : author.averageScore >= 0.45 ? '#3b82f6' : '#e11d48' }}>
+                          {author.averageScore.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ marginBottom: '40px' }}>
               <h3 style={{ fontSize: '20px', marginBottom: '15px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>Complete Audit Log</h3>

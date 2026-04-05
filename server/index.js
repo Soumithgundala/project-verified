@@ -6,7 +6,8 @@ import cors from 'cors';
 import { Parser, Language } from 'web-tree-sitter';
 
 import { analyzeRepositoryAST as generateLLMSummary } from './utils/ai_wrapper.js';
-import { extractProjectFingerprint, huntGlobalClones } from './utils/astRadar.js';
+import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash } from './utils/astRadar.js';
+import { lookupAstHash, saveAstHash } from './utils/astHashDb.js';
 import repoCache from './utils/diskCache.js';
 
 const app = express();
@@ -115,7 +116,7 @@ function splitDiff(patch) {
 const MODULE_VERSIONS = {
   commits:     1,  // bump if: scoring formula, AST logic, or clustering changes
   llmSummary:  1,  // bump if: LLM prompt template or model selection changes
-  originality: 2,  // v2: added pushed:<date> filter to huntGlobalClones
+  originality: 3,  // v3: two-strike system (local AST hash DB + GitHub fallback)
 };
 
 app.post('/api/link-repo', async (req, res) => {
@@ -224,9 +225,11 @@ app.post('/api/link-repo', async (req, res) => {
     });
     const latest = historyLog[0] || { details: { n1: 0, n2: 0, d: 0, cstStr: "" }, score: 1 };
 
-    // ── MODULE 2 & 3: INTELLIGENCE ─────────────────────────────────────────
-    // Each sub-module checks its own version independently.
-    // The fingerprint (heavy GitHub API call) is fetched once if EITHER needs it.
+    // ── MODULE 2 & 3: INTELLIGENCE (Two-Strike System) ─────────────────────
+    // Strike 1: Local AST Hash DB lookup (~5ms, $0.00 cost)
+    // Strike 2: GitHub Global Search API (only when Strike 1 misses)
+    // The Genius Move: on a Strike 2 hit, save the clone's hash to local DB
+    //                  so future copies are caught at Strike 1.
     const llmVersionOk  = !shaChanged && cached?.llmSummary?.version  === MODULE_VERSIONS.llmSummary;
     const origVersionOk = !shaChanged && cached?.originality?.version === MODULE_VERSIONS.originality;
     const needsLLMRun   = !llmVersionOk;
@@ -249,11 +252,81 @@ app.post('/api/link-repo', async (req, res) => {
       }
 
       if (needsOrigRun) {
-        console.log(`🔄 [RERUN] Originality module for ${cacheKey}`);
-        const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
-        globalOriginality = fingerprint
-          ? await huntGlobalClones(fingerprint.anchorString, owner, repo, headers, firstCommitDate)
-          : { status: 'Original', matches: [] };
+        console.log(`🔄 [RERUN] Originality module (Two-Strike) for ${cacheKey}`);
+        globalOriginality = { status: 'Original', matches: [], similarityScore: null };
+
+        if (fingerprint) {
+          // ── Parse the student's fingerprint file AST ─────────────────────
+          let studentTree = null;
+          let studentHash = null;
+
+          if (parser) {
+            const fileExt = Object.keys(extensionMap).find(ext => fingerprint.fileName.endsWith(ext)) || '.js';
+            const langKey = extensionMap[fileExt];
+            if (grammars[langKey]) {
+              parser.setLanguage(grammars[langKey]);
+              studentTree = parser.parse(fingerprint.rawCode);
+              studentHash = generateStructuralHash(studentTree.rootNode);
+              console.log(`🔑 [Strike 1] Student AST hash: ${studentHash.substring(0, 12)}...`);
+            }
+          }
+
+          // ══════════════════════════════════════════════════════════════════
+          // STRIKE 1: LOCAL DB LOOKUP (instant, free)
+          // ══════════════════════════════════════════════════════════════════
+          const localMatch = studentHash ? await lookupAstHash(studentHash) : null;
+
+          if (localMatch) {
+            console.log(`🎯 [STRIKE 1 HIT] Hash matched a known clone in local DB! → ${localMatch.sourceUrl}`);
+            globalOriginality = {
+              status: 'Local Clone Detected',
+              matches: [localMatch.sourceUrl],
+              similarityScore: '100.0%'
+            };
+
+          } else {
+            // ══════════════════════════════════════════════════════════════
+            // STRIKE 2: GITHUB GLOBAL SEARCH API (cold start fallback)
+            // ══════════════════════════════════════════════════════════════
+            console.log(`🔍 [STRIKE 1 MISS] No local match. Proceeding to GitHub Global Search...`);
+            const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
+            const huntResult = await huntGlobalClones(
+              fingerprint.anchorString, owner, repo, headers, firstCommitDate
+            );
+
+            globalOriginality.status  = huntResult.status;
+            globalOriginality.matches = huntResult.matches;
+
+            // AST Showdown: compare student tree vs matched clone tree
+            if (huntResult.matchedCode && parser && studentTree) {
+              const fileExt = Object.keys(extensionMap).find(ext => fingerprint.fileName.endsWith(ext)) || '.js';
+              const langKey = extensionMap[fileExt];
+              if (grammars[langKey]) {
+                parser.setLanguage(grammars[langKey]);
+                const cloneTree = parser.parse(huntResult.matchedCode);
+
+                const studentNodes = studentTree.rootNode.descendantCount;
+                const cloneNodes   = cloneTree.rootNode.descendantCount;
+                const distance     = Math.abs(studentNodes - cloneNodes);
+                const maxNodes     = Math.max(studentNodes, cloneNodes);
+                const similarity   = maxNodes > 0 ? ((1 - (distance / maxNodes)) * 100).toFixed(1) : 0;
+
+                globalOriginality.similarityScore = `${similarity}%`;
+                console.log(`⚖️  [Strike 2] AST Showdown: ${similarity}% structurally identical.`);
+
+                // ════════════════════════════════════════════════════════════
+                // THE GENIUS MOVE: save clone's hash so future copies are
+                // caught instantly at Strike 1 — zero GitHub API calls.
+                // ════════════════════════════════════════════════════════════
+                if (parseFloat(similarity) > 90 && huntResult.matches.length > 0) {
+                  const cloneHash = generateStructuralHash(cloneTree.rootNode);
+                  await saveAstHash(cloneHash, huntResult.matches[0], fingerprint.fileName);
+                  console.log(`💾 [GENIUS MOVE] Clone hash saved → future copies caught at Strike 1.`);
+                }
+              }
+            }
+          }
+        }
       } else {
         console.log(`🟢 [CACHE] Originality module valid for ${cacheKey}`);
       }
@@ -261,12 +334,33 @@ app.post('/api/link-repo', async (req, res) => {
       console.log(`🟢 [CACHE] Intelligence modules both valid for ${cacheKey}`);
     }
 
+    // ── AUTHOR BREAKDOWN & GHOSTWRITER DETECTION ─────────────────────────
+    // Groups all commits by author, calculates commit count and average
+    // integrity score per contributor. Surfaces alt-accounts, ghostwriters,
+    // and uneven team contribution in group projects.
+    const authorMap = {};
+    historyLog.forEach(c => {
+      const authorName = c.author || "Unknown";
+      if (!authorMap[authorName]) {
+        authorMap[authorName] = { name: authorName, commitCount: 0, totalScore: 0, commits: [] };
+      }
+      authorMap[authorName].commitCount += 1;
+      authorMap[authorName].totalScore  += c.score;
+      authorMap[authorName].commits.push(c.sha);
+    });
+    const authorStats = Object.values(authorMap).map(a => ({
+      name:         a.name,
+      commitCount:  a.commitCount,
+      averageScore: parseFloat((a.totalScore / a.commitCount).toFixed(2))
+    })).sort((a, b) => b.commitCount - a.commitCount); // Most active first
+
     // ── Assemble final payload ─────────────────────────────────────────────
     const finalPayload = {
       repoInfo:  { owner, repo },
       commits:   historyLog,
       pulseData: graphData.map(g => ({ name: g.sha, score: g.score })),
       clusters,
+      authorStats,
       intelligence: { globalOriginality, llmSummary },
       analysis: {
         oldNodeCount: latest.details.n1,
