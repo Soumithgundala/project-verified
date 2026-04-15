@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { Activity, ShieldCheck, ShieldAlert, CheckCircle, Users, Terminal, GitCommit, Fingerprint, Layers, Cpu, ArrowLeft, Download, HelpCircle, X } from 'lucide-react';
+import { Activity, ShieldCheck, ShieldAlert, CheckCircle, Users, Terminal, GitCommit, Fingerprint, Layers, Cpu, ArrowLeft, Download, HelpCircle, X, FileText, XCircle, AlertCircle } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import './GitPulseMVP.css';
 
 // NEW: Added initialData and isModalView props
-const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = false }) => {
+const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, isModalView = false }) => {
   const [loading, setLoading] = useState(!initialData);
   const [data, setData] = useState(initialData);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -22,14 +22,30 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
 
     const analyzeRepo = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/link-repo', {
+        const repoFetch = fetch('http://localhost:5000/api/link-repo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: linkedUrl }),
-        });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const result = await response.json();
-        if (result.success) setData(result);
+        }).then(r => r.json());
+
+        let auditFetch = Promise.resolve({});
+        if (auditDocument) {
+          const formData = new FormData();
+          formData.append('githubUrl', linkedUrl);
+          formData.append('document', auditDocument);
+          auditFetch = fetch('http://localhost:5000/api/audit-document', {
+            method: 'POST',
+            body: formData,
+          }).then(r => r.json());
+        }
+
+        const [repoResult, auditResult] = await Promise.all([repoFetch, auditFetch]);
+
+        if (repoResult.success) {
+          setData({ ...repoResult, ...auditResult });
+        } else {
+          throw new Error("Repository analysis failed");
+        }
       } catch (err) {
         console.error("Analysis failed:", err);
       } finally {
@@ -37,7 +53,7 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
       }
     };
     if (linkedUrl && !initialData) analyzeRepo();
-  }, [linkedUrl, initialData]);
+  }, [linkedUrl, auditDocument, initialData]);
 
   const handleDownloadPDF = () => {
     setIsPrinting(true);
@@ -163,6 +179,78 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                 <div className="icon-box"><Cpu size={24} /></div>
               </div>
 
+              {/* --- CROSS-MODAL ALIGNMENT MATRIX --- */}
+              {data.matrix && (
+                <div className="card matrix-card">
+                  <div className="matrix-header">
+                    <div className="matrix-title-container">
+                      <h3 className="matrix-title">
+                        <FileText size={20} className="text-blue-600" /> Document Alignment Matrix
+                      </h3>
+                      <p className="matrix-subtitle">
+                        Verifying extracted claims from report against repository logic.
+                      </p>
+                    </div>
+
+                    {/* Alignment Score Badge */}
+                    <div className="matrix-score-badge">
+                      <p className="matrix-score-label">Alignment Score</p>
+                      <span className={`matrix-score-value ${
+                        data.alignmentScore >= 80 ? 'matrix-score-high' :
+                        data.alignmentScore >= 50 ? 'matrix-score-medium' :
+                        'matrix-score-low'
+                      }`}>
+                        {data.alignmentScore}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="matrix-container">
+                    {data.matrix.map((item, index) => {
+                      const isVerified = item.status.includes('Verified');
+                      const isMissing = item.status.includes('Missing');
+                      
+                      return (
+                        <div 
+                          key={index} 
+                          className={`matrix-item ${
+                            isVerified ? 'matrix-item-verified' : 
+                            isMissing ? 'matrix-item-missing' : 
+                            'matrix-item-warning'
+                          }`}
+                        >
+                          <div className="matrix-item-left">
+                            {isVerified ? (
+                              <CheckCircle size={18} style={{ color: '#10b981' }} />
+                            ) : isMissing ? (
+                              <XCircle size={18} style={{ color: '#f43f5e' }} />
+                            ) : (
+                              <AlertCircle size={18} style={{ color: '#f59e0b' }} />
+                            )}
+                            
+                            <span className={`matrix-item-name ${
+                              isVerified ? 'matrix-name-verified' : 
+                              isMissing ? 'matrix-name-missing' : 
+                              'matrix-name-warning'
+                            }`}>
+                              {item.name}
+                            </span>
+                          </div>
+                          
+                          <span className={`matrix-item-status ${
+                            isVerified ? 'matrix-status-verified' : 
+                            isMissing ? 'matrix-status-missing' : 
+                            'matrix-status-warning'
+                          }`}>
+                            {item.status}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {Object.entries(data.clusters).map(([key, group]) => (
                 <div key={key} className={`card cluster-card border-${key}`}>
                   <div className="cluster-header">
@@ -226,7 +314,7 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                           <span style={{
                             padding: '3px 10px', borderRadius: '6px', fontSize: '0.875rem', fontWeight: '900',
                             backgroundColor: author.averageScore >= 0.85 ? '#d1fae5' : author.averageScore >= 0.45 ? '#dbeafe' : '#ffe4e6',
-                            color:           author.averageScore >= 0.85 ? '#065f46' : author.averageScore >= 0.45 ? '#1e40af' : '#9f1239'
+                            color: author.averageScore >= 0.85 ? '#065f46' : author.averageScore >= 0.45 ? '#1e40af' : '#9f1239'
                           }}>
                             {author.averageScore.toFixed(2)}
                           </span>
@@ -258,10 +346,10 @@ const GitPulseMVP = ({ linkedUrl, onReset, initialData = null, isModalView = fal
                       <div style={{
                         marginTop: '1rem', padding: '1.25rem', borderRadius: '0.75rem',
                         backgroundColor: data.intelligence.globalOriginality?.status === 'Original' ? '#ecfdf5' :
-                                         data.intelligence.globalOriginality?.status?.includes('Clone') ? '#fff1f2' : '#eff6ff',
+                          data.intelligence.globalOriginality?.status?.includes('Clone') ? '#fff1f2' : '#eff6ff',
                         border: '1px solid',
                         borderColor: data.intelligence.globalOriginality?.status === 'Original' ? '#a7f3d0' :
-                                     data.intelligence.globalOriginality?.status?.includes('Clone') ? '#fecdd3' : '#bfdbfe'
+                          data.intelligence.globalOriginality?.status?.includes('Clone') ? '#fecdd3' : '#bfdbfe'
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                           {data.intelligence.globalOriginality?.status === 'Original'

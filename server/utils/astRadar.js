@@ -147,3 +147,66 @@ export async function huntGlobalClones(anchorString, owner, repo, headers, first
         return { status: 'Search Error', matches: [], matchedCode: null };
     }
 }
+
+// =================================================================
+// VERIFICATION: Cross-reference LLM-extracted claims against the actual repo
+// =================================================================
+export async function verifyTechStack(owner, repo, latestSha, claimsArray) {
+    if (!claimsArray || claimsArray.length === 0) return [];
+    const lowerClaims = claimsArray.map(c => c.toLowerCase());
+    const results = lowerClaims.map(claim => ({ name: claim, status: 'Missing in Code' }));
+
+    let combinedConfigText = "";
+
+    try {
+        // Try to fetch package.json
+        const pkgRes = await axios.get(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/package.json?ref=${latestSha}`, { headers, validateStatus: () => true });
+        if (pkgRes.status === 200 && pkgRes.data && pkgRes.data.content) {
+            combinedConfigText += Buffer.from(pkgRes.data.content, 'base64').toString('utf-8').toLowerCase();
+        }
+
+        // Try to fetch requirements.txt
+        const reqRes = await axios.get(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/requirements.txt?ref=${latestSha}`, { headers, validateStatus: () => true });
+        if (reqRes.status === 200 && reqRes.data && reqRes.data.content) {
+            combinedConfigText += Buffer.from(reqRes.data.content, 'base64').toString('utf-8').toLowerCase();
+        }
+
+        // Try to fetch Pipfile
+        const pipRes = await axios.get(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/Pipfile?ref=${latestSha}`, { headers, validateStatus: () => true });
+        if (pipRes.status === 200 && pipRes.data && pipRes.data.content) {
+            combinedConfigText += Buffer.from(pipRes.data.content, 'base64').toString('utf-8').toLowerCase();
+        }
+
+        // 1. Dependency Check
+        results.forEach(item => {
+            // Very simple substring checking in the stringified config files. 
+            // Better check: regex bounding to avoid substring matches like "act" in "react"
+            // But since claims are normalized, includes() is a good first start. 
+            // We can look for `"react"` or `react==`
+            if (combinedConfigText.includes(`"${item}"`) || combinedConfigText.includes(`${item}==`) || combinedConfigText.includes(`${item}>=`)) {
+                item.status = 'Verified';
+            }
+        });
+
+        // 2. API / Logic Deep Scan Fallback (for claims not found in config)
+        const unverified = results.filter(r => r.status === 'Missing in Code');
+        if (unverified.length > 0) {
+            // Get the heaviest logic file's rawCode to check for API keys or libraries loaded dynamically
+            const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
+            if (fingerprint && fingerprint.rawCode) {
+                const lowerRawCode = fingerprint.rawCode.toLowerCase();
+                unverified.forEach(item => {
+                    // Check if the claim string appears in the logic code (e.g. fetch('xeno-canto'), import x from 'tensorflow')
+                    if (lowerRawCode.includes(item.name)) {
+                        item.status = 'Verified (In Logic)';
+                    }
+                });
+            }
+        }
+
+    } catch (err) {
+        console.error("Verification Math Failed:", err.message);
+    }
+
+    return results;
+}

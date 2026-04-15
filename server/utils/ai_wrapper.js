@@ -70,8 +70,29 @@ async function analyzeRepositoryAST(repositoryName, astData) {
     return await generateSummary(prompt);
 }
 
+async function normalizeTechClaims(textSlice) {
+    const prompt = `You are a strict data normalizer. Read this text slice from an academic project report. Extract the core software, frameworks, databases, and APIs the student claims to have used.
+You MUST normalize the names to their standard package-manager formats (e.g., change 'React.js' to 'react', 'PostgreSQL' to 'pg' or 'postgres', 'NodeJS' to 'node').
+Return ONLY a flat JSON array of lowercase strings. Example: ['react', 'node', 'flask', 'leaflet']. No markdown, no introduction, and no extra text.
+
+Text Slice:
+${textSlice}`;
+
+    const rawResponse = await generateSummary(prompt);
+    try {
+        // Strip out any markdown blocks if the LLM hallucinated them despite instructions
+        const cleanJsonStr = rawResponse.replace(/```json/g, "").replace(/```/g, "").trim();
+        const claimsArray = JSON.parse(cleanJsonStr);
+        return Array.isArray(claimsArray) ? claimsArray : [];
+    } catch (err) {
+        console.error("❌ [AI Wrapper] Failed to parse claims as JSON:", rawResponse);
+        return [];
+    }
+}
+
 // Export using ES Modules (since you are using 'import' at the top)
 export {
     generateSummary,
-    analyzeRepositoryAST
+    analyzeRepositoryAST,
+    normalizeTechClaims
 };

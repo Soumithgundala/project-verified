@@ -7,12 +7,18 @@ import './App.css';
 function App() {
   const [repoLinked, setRepoLinked] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');
+  const [auditDocument, setAuditDocument] = useState(null);
 
   const [viewMode, setViewMode] = useState('single');
 
   // Callback to move from linking to analysis
-  const handleConnectionSuccess = (url) => {
-    setRepoUrl(url);
+  const handleConnectionSuccess = (payload) => {
+    if (typeof payload === 'string') {
+      setRepoUrl(payload);
+    } else {
+      setRepoUrl(payload.url);
+      setAuditDocument(payload.document);
+    }
     setRepoLinked(true);
   };
 
@@ -20,6 +26,7 @@ function App() {
   const handleReset = () => {
     setRepoLinked(false);
     setRepoUrl('');
+    setAuditDocument(null);
     setViewMode('single');
   };
 
@@ -67,7 +74,7 @@ function App() {
                 </div>
               </>
             ) : (
-              <GitPulseMVP linkedUrl={repoUrl} onReset={handleReset} />
+              <GitPulseMVP linkedUrl={repoUrl} auditDocument={auditDocument} onReset={handleReset} />
             )}
           </div>
         )}

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Github, Shield, CheckCircle, Lock, Link as LinkIcon } from 'lucide-react';
+import { Github, Shield, CheckCircle, Lock, Link as LinkIcon, UploadCloud } from 'lucide-react';
 
 const GithubConnect = ({ onRepoLinked }) => {
   const [repoUrl, setRepoUrl] = useState('');
+  const [auditFile, setAuditFile] = useState(null);
   const [isConsented, setIsConsented] = useState(false);
   const [error, setError] = useState('');
 
@@ -15,7 +16,7 @@ const GithubConnect = ({ onRepoLinked }) => {
     }
 
     if (repoUrl.toLowerCase().includes('github.com')) {
-      onRepoLinked(repoUrl);
+      onRepoLinked({ url: repoUrl, document: auditFile });
     } else {
       setError("Please enter a valid GitHub repository URL.");
     }
@@ -46,6 +47,23 @@ const GithubConnect = ({ onRepoLinked }) => {
               if (error) setError('');
             }}
           />
+        </div>
+      </div>
+
+      {/* --- NEW: DOCUMENT UPLOAD ZONE --- */}
+      <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 mb-6 bg-slate-50 hover:bg-slate-100 transition-colors text-center relative" style={{ margin: '0 0 20px 0', border: '2px dashed #cbd5e1', padding: '16px', borderRadius: '8px', backgroundColor: '#f8fafc', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <input 
+          type="file" 
+          accept=".docx,.pdf"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+          onChange={(e) => setAuditFile(e.target.files[0])}
+        />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none' }}>
+          <UploadCloud size={32} style={{ color: auditFile ? '#10b981' : '#94a3b8', marginBottom: '8px' }} />
+          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155' }}>
+            {auditFile ? auditFile.name : "Upload Student Report (.docx)"}
+          </span>
+          {!auditFile && <span style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Cross-reference documentation against codebase</span>}
         </div>
       </div>
 
