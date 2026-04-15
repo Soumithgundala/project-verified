@@ -1,0 +1,43 @@
+:root {
+  --bg-main: #F8FAFC;
+  --slate-800: #1e293b;
+}
+
+.dashboard-wrapper {
+  min-height: 100vh;
+  background-color: var(--bg-main);
+  color: var(--slate-800);
+  padding-bottom: 3rem;
+  font-family: sans-serif;
+}
+
+.dashboard-wrapper.modal-view {
+  min-height: 0;
+  padding-bottom: 1rem;
+}
+
+.dashboard-wrapper.relative {
+  position: relative;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4rem;
+  text-align: center;
+}
+.loader-icon-wrapper {
+  color: #4f46e5;
+  margin-bottom: 1rem;
+}
+.loading-state h2 {
+  font-size: 1.5rem;
+  color: #1e293b;
+  margin: 0 0 0.5rem 0;
+}
+.loading-state p {
+  color: #64748b;
+  margin: 0;
+}

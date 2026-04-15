@@ -1,0 +1,236 @@
+import React from 'react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+import '../styles/GitPulse/GitPulsePdfReport.css';
+
+const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
+  return (
+    <div className={`pdf-container ${isPrinting ? 'is-printing' : ''}`}>
+      <div className="pdf-header">
+        <div>
+          <h1 className="pdf-title">Forensic Integrity Report</h1>
+          <p className="pdf-subtitle">Repository: <strong>{linkedUrl}</strong></p>
+          <p className="pdf-subtitle">Generated: <strong>{new Date().toLocaleString()}</strong></p>
+        </div>
+        <div className="pdf-score-wrapper">
+          <p className="pdf-score-label">Integrity Score</p>
+          <h2 className="pdf-score-value">{data.analysis.rewardScore.toFixed(2)}</h2>
+          <span className={`pdf-status-badge ${isAuthentic ? 'authentic' : 'warning'}`}>
+            {data.analysis.status.toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      <div className="pdf-stats-row">
+        <div className="pdf-stat-item">
+          <p className="pdf-stat-label">Old AST Nodes</p>
+          <p className="pdf-stat-value">{data.analysis.oldNodeCount}</p>
+        </div>
+        <div className="pdf-stat-item">
+          <p className="pdf-stat-label">New AST Nodes</p>
+          <p className="pdf-stat-value">{data.analysis.newNodeCount}</p>
+        </div>
+        <div className="pdf-stat-item">
+          <p className="pdf-stat-label">Zhang-Shasha Distance</p>
+          <p className="pdf-stat-value pdf-stat-primary">{data.analysis.editDistance}</p>
+        </div>
+      </div>
+
+      {data.intelligence && (
+        <div className="pdf-section no-break">
+          <div className="pdf-intel-row">
+            <div className={`pdf-intel-origin ${data.intelligence.globalOriginality?.status === 'Original' ? 'authentic' : ''}`}>
+              <p className="pdf-intel-origin-label">Origin Verification</p>
+              <h3 className={`pdf-intel-origin-status ${data.intelligence.globalOriginality?.status === 'Original' ? 'authentic' : 'warning'}`}>
+                {data.intelligence.globalOriginality?.status || 'Pending'}
+              </h3>
+
+              {data.intelligence.globalOriginality?.similarityScore && (
+                <div className="pdf-intel-sim-box">
+                  <p className="pdf-intel-sim-label">AST STRUCTURAL SIMILARITY:</p>
+                  <p className="pdf-intel-sim-val">{data.intelligence.globalOriginality.similarityScore}</p>
+                </div>
+              )}
+
+              {data.intelligence.globalOriginality?.matches?.length > 0 && (
+                <div>
+                  <p className="pdf-intel-match-label">Matched Sources:</p>
+                  {data.intelligence.globalOriginality.matches.map((url, idx) => (
+                    <p key={idx} className="pdf-intel-match-url">{url}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pdf-intel-summary">
+              <p className="pdf-intel-summary-label">Semantic Code Analysis</p>
+              <div className="pdf-intel-summary-text">
+                {typeof data.intelligence.llmSummary === 'string'
+                  ? data.intelligence.llmSummary
+                  : data.intelligence.llmSummary?.overall_logic_summary || "No semantic summary available."}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="pdf-section">
+        <h3 className="pdf-section-title">Evolution Pulse</h3>
+        <div className="pdf-chart-container">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data.pulseData}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+              <YAxis domain={[0, 1]} stroke="#94a3b8" tick={{ fontSize: 12 }} />
+              <Area isAnimationActive={false} type="monotone" dataKey="score" stroke="#4f46e5" strokeWidth={3} fillOpacity={0.1} fill="#4f46e5" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {data.clusters.suspect.commits.length > 0 && (
+        <div className="pdf-suspect-box">
+          <h3 className="pdf-suspect-title">⚠️ High-Velocity Dumps Detected ({data.clusters.suspect.commits.length})</h3>
+          <div className="pdf-suspect-grid">
+            {data.clusters.suspect.commits.map(c => (
+              <div key={c.sha} className="pdf-suspect-item">
+                <div className="pdf-suspect-item-header">
+                  <span className="pdf-suspect-item-msg">
+                    {c.message ? c.message.split('\n')[0].substring(0, 45) + (c.message.length > 45 ? '…' : '') : c.sha}
+                  </span>
+                  <span className="pdf-suspect-item-score">r: {c.score}</span>
+                </div>
+                <span className="pdf-suspect-item-sha">{c.sha}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="pdf-section">
+        <h3 className="pdf-section-title">Semantic Commit Clusters</h3>
+        <div className="pdf-clusters">
+          {Object.entries(data.clusters).map(([key, group]) => {
+            const clusterClass = key === 'authentic' ? 'authentic' : key === 'standard' ? 'standard' : 'suspect';
+            return (
+              <div key={key} className={`pdf-cluster-box ${clusterClass}`}>
+                <div className="pdf-cluster-header">
+                  <h4 className="pdf-cluster-title">{group.label}</h4>
+                  <span className="pdf-cluster-count">{group.commits.length} Commits</span>
+                </div>
+                <div className="pdf-cluster-grid">
+                  {group.commits.length > 0 ? group.commits.map((c, i) => (
+                    <div key={i} className="pdf-cluster-item">
+                      <div className="pdf-cluster-item-left">
+                        <p className="pdf-cluster-item-msg">
+                          {c.message ? c.message.split('\n')[0].substring(0, 40) + (c.message.length > 40 ? '…' : '') : c.sha}
+                        </p>
+                        <p className="pdf-cluster-item-sha">{c.sha}</p>
+                      </div>
+                      <span className="pdf-cluster-item-score">r: {c.score}</span>
+                    </div>
+                  )) : (
+                    <p className="pdf-cluster-empty">No commits in cluster</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {data.authorStats && data.authorStats.length > 0 && (
+        <div className="pdf-section no-break">
+          <h3 className="pdf-section-title">
+            Contributor Authentication ({data.authorStats.length} Detected)
+          </h3>
+          <div className="pdf-authors-grid">
+            {data.authorStats.map((author, i) => {
+              const scoreClass = author.averageScore >= 0.85 ? 'high' : author.averageScore >= 0.45 ? 'mid' : 'low';
+              return (
+                <div key={i} className="pdf-author-card">
+                  <div>
+                    <p className="pdf-author-name">{author.name}</p>
+                    <p className="pdf-author-count">{author.commitCount} Total Commits</p>
+                  </div>
+                  <div className="pdf-author-score-wrapper">
+                    <p className="pdf-author-score-label">Avg Integrity</p>
+                    <p className={`pdf-author-score-value ${scoreClass}`}>
+                      {author.averageScore.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="pdf-section">
+        <h3 className="pdf-section-title">Complete Audit Log</h3>
+        <table className="pdf-log-table">
+          <thead>
+            <tr>
+              <th>Commit SHA</th>
+              <th>Date</th>
+              <th>Message</th>
+              <th style={{ textAlign: 'right' }}>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.commits.map(c => (
+              <tr key={c.sha}>
+                <td className="pdf-log-cell-sha">{c.sha}</td>
+                <td className="pdf-log-cell-date">{new Date(c.date).toLocaleDateString()}</td>
+                <td>{c.message.substring(0, 60)}{c.message.length > 60 ? '...' : ''}</td>
+                <td className={`pdf-log-cell-score ${c.score < 0.45 ? 'warning' : ''}`}>{c.score}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pdf-section no-break">
+        <h3 className="pdf-section-title">Raw CST Fragment</h3>
+        <div className="pdf-cst-box">
+          {data.analysis.cst}
+        </div>
+      </div>
+
+      <div className="pdf-section no-break">
+        <h3 className="pdf-section-title">AI Semantic Analysis Summary</h3>
+        <div className="pdf-intel-semantic-box">
+          {typeof data.intelligence?.llmSummary === 'string' ? data.intelligence.llmSummary : data.intelligence?.llmSummary?.overall_logic_summary || "No semantic summary generated for this repository."}
+        </div>
+      </div>
+
+      <div className="pdf-appendix">
+        <h2 className="pdf-appendix-title">Appendix: Understanding the Metrics</h2>
+        <div className="pdf-appendix-body">
+          <div className="pdf-appendix-box primary">
+            <h4 className="pdf-appendix-subtitle">1. What are AST Nodes? (Old vs. New)</h4>
+            <p className="pdf-appendix-text">An Abstract Syntax Tree (AST) is a mathematical representation of the code's structure. <strong> Old AST Nodes</strong> represent the complexity of the codebase <em>before</em> the commit. <strong> New AST Nodes</strong> represent the complexity <em>after</em> the commit. Comparing them allows us to measure exact structural growth.</p>
+          </div>
+          <div className="pdf-appendix-box primary">
+            <h4 className="pdf-appendix-subtitle">2. How is the Integrity Score Calculated?</h4>
+            <p className="pdf-appendix-text">The engine uses the Zhang-Shasha algorithm to calculate the <strong>Tree Edit Distance</strong> (the minimum number of semantic operations needed to transform the Old AST into the New AST). The Integrity Score ($r$) is calculated as: <code>1 - (Edit Distance / Max Nodes)</code>. A massive injection of code without gradual human edits results in a low score.</p>
+          </div>
+          <div className="pdf-appendix-box success">
+            <h4 className="pdf-appendix-subtitle">3. What is considered a Good Score?</h4>
+            <ul className="pdf-appendix-list">
+              <li><strong>0.85 - 1.00 (Authentic):</strong> Indicates steady, human-paced development and careful refactoring.</li>
+              <li><strong>0.45 - 0.84 (Standard):</strong> Normal feature additions and expected structural modifications.</li>
+              <li><strong>0.00 - 0.44 (Suspect):</strong> Anomalous "High-Velocity Dumps." Often indicates pasting large AI-generated blocks or uncredited boilerplate.</li>
+            </ul>
+          </div>
+          <div className="pdf-appendix-box dark">
+            <h4 className="pdf-appendix-subtitle">4. How to read the Raw CST Fragment?</h4>
+            <p className="pdf-appendix-text">The Concrete Syntax Tree (CST) fragment is the raw grammar output generated by our parsers. It strips away formatting and exposes how the machine interprets the logic. It acts as the immutable forensic proof used to calculate the edit distance.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+};
+
+export default GitPulsePdfReport;
