@@ -203,6 +203,61 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
         </div>
       </div>
 
+      {data.matrix && data.matrix.length > 0 && (
+        <div className="pdf-section no-break">
+          <h3 className="pdf-section-title">Document Alignment Matrix</h3>
+
+          {/* Score banner */}
+          <div className="pdf-align-banner">
+            <div className="pdf-align-score-block">
+              <p className="pdf-align-score-label">Alignment Score</p>
+              <p className={`pdf-align-score-value ${data.alignmentScore >= 70 ? 'high' : data.alignmentScore >= 40 ? 'mid' : 'low'}`}>
+                {data.alignmentScore}%
+              </p>
+            </div>
+            <div className="pdf-align-claims-block">
+              <p className="pdf-align-claims-label">Technology Claims Detected</p>
+              <p className="pdf-align-claims-value">{data.matrix.length}</p>
+            </div>
+            <div className="pdf-align-verified-block">
+              <p className="pdf-align-verified-label">Verified in Codebase</p>
+              <p className="pdf-align-verified-value">
+                {data.matrix.filter(c => c.status.startsWith('Verified')).length} / {data.matrix.length}
+              </p>
+            </div>
+          </div>
+
+          {/* Matrix table */}
+          <table className="pdf-align-table">
+            <thead>
+              <tr>
+                <th style={{ width: '10%' }}>#</th>
+                <th style={{ width: '40%' }}>Technology Claimed</th>
+                <th style={{ width: '50%' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.matrix.map((row, idx) => {
+                const isVerified = row.status.startsWith('Verified');
+                return (
+                  <tr key={idx} className={isVerified ? 'pdf-align-row-verified' : 'pdf-align-row-unverified'}>
+                    <td className="pdf-align-cell-num">{idx + 1}</td>
+                    <td className="pdf-align-cell-tech">
+                      <span className="pdf-align-tech-badge">{row.name}</span>
+                    </td>
+                    <td>
+                      <span className={`pdf-align-status ${isVerified ? 'verified' : 'unverified'}`}>
+                        {isVerified ? `✓ ${row.status}` : '✗ Not Found'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="pdf-appendix">
         <h2 className="pdf-appendix-title">Appendix: Understanding the Metrics</h2>
         <div className="pdf-appendix-body">

@@ -167,39 +167,23 @@ body {
 
 /* Document Upload Zone */
 .document-upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   margin: 0 0 20px 0;
   border: 2px dashed #cbd5e1;
   padding: 16px;
   border-radius: 8px;
   background-color: #f8fafc;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative; /* Fixes the absolute positioning bug */
   transition: background-color 0.2s ease;
+  /* No position: relative needed — no absolute children */
 }
 
 .document-upload-zone:hover {
   background-color: #f1f5f9;
 }
 
-.document-upload-input {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.document-upload-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  pointer-events: none;
-}
 
 .document-upload-icon {
   margin-bottom: 8px;

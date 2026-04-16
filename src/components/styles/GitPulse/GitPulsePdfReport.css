@@ -447,6 +447,105 @@
   word-break: break-all;
 }
 
+/* Document Alignment Matrix */
+.pdf-align-banner {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+.pdf-align-score-block,
+.pdf-align-claims-block,
+.pdf-align-verified-block {
+  flex: 1;
+  padding: 18px 20px;
+  text-align: center;
+}
+.pdf-align-score-block { background-color: #f0f9ff; border-right: 1px solid #e2e8f0; }
+.pdf-align-claims-block { background-color: #f8fafc; border-right: 1px solid #e2e8f0; }
+.pdf-align-verified-block { background-color: #f0fdf4; }
+
+.pdf-align-score-label,
+.pdf-align-claims-label,
+.pdf-align-verified-label {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  font-weight: bold;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pdf-align-score-value {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 900;
+  line-height: 1;
+}
+.pdf-align-score-value.high { color: #10b981; }
+.pdf-align-score-value.mid  { color: #f59e0b; }
+.pdf-align-score-value.low  { color: #e11d48; }
+
+.pdf-align-claims-value,
+.pdf-align-verified-value {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.pdf-align-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+.pdf-align-table th {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  padding: 10px 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: bold;
+}
+.pdf-align-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+.pdf-align-row-verified  { background-color: #f0fdf4; }
+.pdf-align-row-unverified { background-color: #fff1f2; }
+
+.pdf-align-cell-num {
+  color: #94a3b8;
+  font-weight: bold;
+  text-align: center;
+}
+.pdf-align-cell-tech {
+  white-space: nowrap;
+}
+.pdf-align-tech-badge {
+  display: inline-block;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: bold;
+}
+.pdf-align-status {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: bold;
+}
+.pdf-align-status.verified   { background-color: #d1fae5; color: #047857; }
+.pdf-align-status.unverified { background-color: #ffe4e6; color: #be123c; }
+
 /* Appendix */
 .pdf-appendix {
   page-break-before: always;

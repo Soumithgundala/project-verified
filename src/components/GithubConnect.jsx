@@ -50,22 +50,29 @@ const GithubConnect = ({ onRepoLinked }) => {
         </div>
       </div>
 
-      {/* --- NEW: DOCUMENT UPLOAD ZONE --- */}
-      <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 mb-6 bg-slate-50 hover:bg-slate-100 transition-colors text-center relative" style={{ margin: '0 0 20px 0', border: '2px dashed #cbd5e1', padding: '16px', borderRadius: '8px', backgroundColor: '#f8fafc', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <input 
-          type="file" 
-          accept=".docx,.pdf"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
-          onChange={(e) => setAuditFile(e.target.files[0])}
+      {/* --- DOCUMENT UPLOAD ZONE --- */}
+      {/* Standard pattern: input is hidden, label triggers it via htmlFor */}
+      <input
+        id="report-upload"
+        type="file"
+        accept=".docx,.pdf"
+        style={{ display: 'none' }}
+        onChange={(e) => setAuditFile(e.target.files[0])}
+      />
+      <label htmlFor="report-upload" className="document-upload-zone">
+        <UploadCloud
+          size={32}
+          className={`document-upload-icon ${auditFile ? 'active' : 'inactive'}`}
         />
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pointerEvents: 'none' }}>
-          <UploadCloud size={32} style={{ color: auditFile ? '#10b981' : '#94a3b8', marginBottom: '8px' }} />
-          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155' }}>
-            {auditFile ? auditFile.name : "Upload Student Report (.docx)"}
+        <span className="document-upload-name">
+          {auditFile ? auditFile.name : "Upload Student Report (.docx)"}
+        </span>
+        {!auditFile && (
+          <span className="document-upload-subtitle">
+            Cross-reference documentation against codebase
           </span>
-          {!auditFile && <span style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Cross-reference documentation against codebase</span>}
-        </div>
-      </div>
+        )}
+      </label>
 
       {/* Consent Section */}
       <label className={`consent-box ${isConsented ? 'active' : ''}`}>
