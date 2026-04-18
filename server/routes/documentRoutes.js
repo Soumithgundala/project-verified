@@ -56,7 +56,7 @@ router.post('/audit-document', upload.single('document'), async (req, res) => {
     if (!fetchedCommits?.length) throw new Error("No commits found in this repository.");
     const latestSha = fetchedCommits[0].sha;
 
-    const verificationMatrix = await verifyTechStack(owner, repo, latestSha, claimsArray);
+    const verificationMatrix = await verifyTechStack(owner, repo, latestSha, claimsArray, headers);
 
     // Calculate score
     const verifiedCount = verificationMatrix.filter(c => c.status.startsWith('Verified')).length;

@@ -87,11 +87,18 @@ router.post('/link-repo', async (req, res) => {
               const { oldCode, newCode } = splitDiff(rawHunk);
               const treeOld = parser.parse(oldCode);
               const treeNew = parser.parse(newCode);
-              n1 = treeOld.rootNode.descendantCount;
-              n2 = treeNew.rootNode.descendantCount;
-              d  = Math.abs(n2 - n1);
-              r  = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
-              cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+              
+              if (treeOld.rootNode.hasError() || treeNew.rootNode.hasError()) {
+                  console.warn(`[!] AST Parser flagged (ERROR) nodes in commit ${c.sha}. Aborting struct measurement.`);
+                  d = 0; // Abort edit distance measurement
+                  cstStr = "(ERROR) Minified or Invalid Syntax Detected";
+              } else {
+                  n1 = treeOld.rootNode.descendantCount;
+                  n2 = treeNew.rootNode.descendantCount;
+                  d  = Math.abs(n2 - n1);
+                  r  = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
+                  cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+              }
             }
           }
           return {
@@ -159,8 +166,15 @@ router.post('/link-repo', async (req, res) => {
             if (grammars[langKey]) {
               parser.setLanguage(grammars[langKey]);
               studentTree = parser.parse(fingerprint.rawCode);
-              studentHash = generateStructuralHash(studentTree.rootNode);
-              console.log(`🔑 [Strike 1] Student AST hash: ${studentHash.substring(0, 12)}...`);
+              
+              if (studentTree.rootNode.hasError()) {
+                  console.warn(`[!] Parser choked on ${fingerprint.fileName} (hasError). Setting parsing failure state.`);
+                  globalOriginality.status = 'Parsing Failure - Minified/Invalid Syntax';
+                  studentHash = null; // abort DB lookup
+              } else {
+                  studentHash = generateStructuralHash(studentTree.rootNode);
+                  console.log(`🔑 [Strike 1] Student AST hash: ${studentHash.substring(0, 12)}...`);
+              }
             }
           }
 

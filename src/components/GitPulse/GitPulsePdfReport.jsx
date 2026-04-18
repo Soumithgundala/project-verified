@@ -239,15 +239,17 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
             <tbody>
               {data.matrix.map((row, idx) => {
                 const isVerified = row.status.startsWith('Verified');
+                const isFailure = row.status.includes('Parsing Failure');
+                
                 return (
-                  <tr key={idx} className={isVerified ? 'pdf-align-row-verified' : 'pdf-align-row-unverified'}>
+                  <tr key={idx} className={isVerified ? 'pdf-align-row-verified' : (isFailure ? 'pdf-align-row-warning' : 'pdf-align-row-unverified')}>
                     <td className="pdf-align-cell-num">{idx + 1}</td>
                     <td className="pdf-align-cell-tech">
                       <span className="pdf-align-tech-badge">{row.name}</span>
                     </td>
                     <td>
-                      <span className={`pdf-align-status ${isVerified ? 'verified' : 'unverified'}`}>
-                        {isVerified ? `✓ ${row.status}` : '✗ Not Found'}
+                      <span className={`pdf-align-status ${isVerified ? 'verified' : (isFailure ? 'warning' : 'unverified')}`}>
+                        {isVerified ? `✓ ${row.status}` : (isFailure ? '⚠ Parsing Failure' : '✗ Not Found')}
                       </span>
                     </td>
                   </tr>

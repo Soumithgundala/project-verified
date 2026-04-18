@@ -41,18 +41,33 @@ export async function extractProjectFingerprint(owner, repo, latestSha, headers)
             { headers }
         );
 
-        // 2. Filter out obvious junk (images, configs, node_modules)
-        const validFiles = treeResponse.data.tree.filter(f =>
-            f.type === 'blob' &&
-            f.size > 200 &&
-            (f.path.endsWith('.js') || f.path.endsWith('.jsx') ||
-             f.path.endsWith('.ts') || f.path.endsWith('.tsx') ||
-             f.path.endsWith('.py') || f.path.endsWith('.java')) &&
-            !f.path.includes('node_modules') &&
-            !f.path.includes('dist') &&
-            !f.path.includes('build') &&
-            !f.path.toLowerCase().includes('test')
-        );
+        // 2. Aggressive Blast Radius Filter (Blacklist toxic/minified content)
+        const excludedDirs = ['node_modules', 'dist', 'build', 'public', 'static', 'out', 'vendor'];
+        const validFiles = treeResponse.data.tree.filter(f => {
+            if (f.type !== 'blob' || f.size <= 200) return false;
+            // Cap at ~150KB. Humans rarely write single files larger than this.
+            if (f.size > 153600) return false; 
+
+            const lowerPath = f.path.toLowerCase();
+            
+            // Check Blacklisted Directories
+            if (excludedDirs.some(dir => lowerPath.includes(`/${dir}/`) || lowerPath.startsWith(`${dir}/`))) return false;
+
+            // Check Blacklisted File Patterns (bundles, chunks, minified)
+            if (lowerPath.endsWith('.min.js') || 
+                lowerPath.endsWith('-bundle.js') || 
+                lowerPath.includes('chunk-') || 
+                lowerPath.includes('test')) {
+                return false;
+            }
+
+            // Allow only standard logic extensions
+            return (
+                lowerPath.endsWith('.js') || lowerPath.endsWith('.jsx') ||
+                lowerPath.endsWith('.ts') || lowerPath.endsWith('.tsx') ||
+                lowerPath.endsWith('.py') || lowerPath.endsWith('.java')
+            );
+        });
 
         if (validFiles.length === 0) return null;
 
@@ -65,6 +80,14 @@ export async function extractProjectFingerprint(owner, repo, latestSha, headers)
         for (const file of topCandidates) {
             const fileData = await axios.get(file.url, { headers });
             const rawCode = Buffer.from(fileData.data.content, 'base64').toString('utf-8');
+
+            // --- NEW: MINIFIED SINGLE-LINE CATCHER ---
+            // If a file is just one or two massive lines of code, it's minified. Skip it.
+            const lines = rawCode.split('\n');
+            if (lines.length < 5 && rawCode.length > 5000) {
+                 console.log(`[!] Skipping ${file.path} - Detected minified single-line code.`);
+                 continue;
+            }
 
             // Proxy for Cyclomatic Complexity — count structural keywords
             const logicScore = (rawCode.match(/function|=>|if|for|while|switch|class|catch/g) || []).length;
@@ -151,7 +174,7 @@ export async function huntGlobalClones(anchorString, owner, repo, headers, first
 // =================================================================
 // VERIFICATION: Cross-reference LLM-extracted claims against the actual repo
 // =================================================================
-export async function verifyTechStack(owner, repo, latestSha, claimsArray) {
+export async function verifyTechStack(owner, repo, latestSha, claimsArray, headers) {
     if (!claimsArray || claimsArray.length === 0) return [];
     const lowerClaims = claimsArray.map(c => c.toLowerCase());
     const results = lowerClaims.map(claim => ({ name: claim, status: 'Missing in Code' }));
@@ -177,13 +200,22 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray) {
             combinedConfigText += Buffer.from(pipRes.data.content, 'base64').toString('utf-8').toLowerCase();
         }
 
+        // CREATE A SUPER-NORMALIZED CONFIG STRING (Strips spaces, hyphens, underscores)
+        const superNormalizedConfig = combinedConfigText.replace(/[-_ ]/g, '');
+
         // 1. Dependency Check
         results.forEach(item => {
-            // Very simple substring checking in the stringified config files. 
-            // Better check: regex bounding to avoid substring matches like "act" in "react"
-            // But since claims are normalized, includes() is a good first start. 
-            // We can look for `"react"` or `react==`
-            if (combinedConfigText.includes(`"${item}"`) || combinedConfigText.includes(`${item}==`) || combinedConfigText.includes(`${item}>=`)) {
+            // Strip the same characters from the LLM's claim
+            const superItem = item.name.replace(/[-_ ]/g, '');
+
+            // Now "xeno-canto" and "xenocanto" will both become "xenocanto" and match perfectly!
+            // We check for common package.json/requirements.txt formats:
+            if (
+                superNormalizedConfig.includes(`"${superItem}"`) || 
+                superNormalizedConfig.includes(`${superItem}==`) || 
+                superNormalizedConfig.includes(`${superItem}>=`) ||
+                superNormalizedConfig.includes(superItem) // Broad fallback
+            ) {
                 item.status = 'Verified';
             }
         });
@@ -191,20 +223,32 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray) {
         // 2. API / Logic Deep Scan Fallback (for claims not found in config)
         const unverified = results.filter(r => r.status === 'Missing in Code');
         if (unverified.length > 0) {
-            // Get the heaviest logic file's rawCode to check for API keys or libraries loaded dynamically
-            const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
-            if (fingerprint && fingerprint.rawCode) {
-                const lowerRawCode = fingerprint.rawCode.toLowerCase();
-                unverified.forEach(item => {
-                    // Check if the claim string appears in the logic code (e.g. fetch('xeno-canto'), import x from 'tensorflow')
-                    if (lowerRawCode.includes(item.name)) {
-                        item.status = 'Verified (In Logic)';
-                    }
-                });
+            try {
+                // Get the heaviest logic file's rawCode to check for API keys or libraries loaded dynamically
+                const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
+                
+                if (fingerprint && fingerprint.rawCode) {
+                    const lowerRawCode = fingerprint.rawCode.toLowerCase();
+                    unverified.forEach(item => {
+                        // Check if the claim string appears in the logic code
+                        if (lowerRawCode.includes(item.name)) {
+                            item.status = 'Verified (In Logic)';
+                        }
+                    });
+                } else {
+                    // Extract failed or returned nothing (e.g. all files filtered out / minified)
+                    console.warn(`[!] Skipping deep scan for ${repo} - no valid logic files or minified bundles found.`);
+                    unverified.forEach(item => item.status = 'Parsing Failure - Minified/Invalid Syntax');
+                }
+            } catch (fallbackErr) {
+                console.error("Deep Scan Fallback Failed:", fallbackErr.message);
+                unverified.forEach(item => item.status = 'Parsing Failure - Minified/Invalid Syntax');
             }
         }
 
     } catch (err) {
+        // This catch block protects the entire config fetching process.
+        // It should rarely be hit since Github API errors are caught or swallowed.
         console.error("Verification Math Failed:", err.message);
     }
 
