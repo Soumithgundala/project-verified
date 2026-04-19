@@ -8,6 +8,22 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const ai = new GoogleGenAI({});
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+/**
+ * SECURITY FENCE: Prompt Injection Defense
+ * Strips all comments from code across JS, TS, Python, Java, and C.
+ * Uses negative lookbehinds to protect URLs (http://).
+ */
+function stripComments(code) {
+    if (!code) return "";
+    return code
+        .replace(/\/\*[\s\S]*?\*\//g, '') // Removes JS/Java/C multi-line (/* ... */)
+        .replace(/"""[\s\S]*?"""/g, '')   // Removes Python multi-line (""" ... """)
+        .replace(/'''[\s\S]*?'''/g, '')   // Removes Python multi-line (''' ... ''')
+        .replace(/(?<!:)\/\/.*/g, '')     // Removes JS/Java/C single-line (// ...) but protects http://
+        .replace(/(?<!['"]\s*)#.*/g, '')  // Removes Python single-line (# ...)
+        .trim();
+}
+
 async function generateSummary(prompt) {
     // 📝 Printing the exact text sent to the LLM
     console.log("\n====================================");
@@ -65,7 +81,10 @@ async function generateSummary(prompt) {
 }
 
 async function analyzeRepositoryAST(repositoryName, astData) {
-    const prompt = `You are an expert code analyzer. Analyze the following AST/code snippet from '${repositoryName}'. Extract the core logic fingerprint and provide a concise summary.\n\nCode/AST:\n${astData}`;
+
+    const safeCode = stripComments(astData);
+    const codeSnippet = safeCode.substring(0, 8000);
+    const prompt = `You are an expert code analyzer. Analyze the following AST/code snippet from '${repositoryName}'. Extract the core logic fingerprint and provide a concise summary.\n\nCode/AST:\n${codeSnippet}`;
     // console.log(`🧠 Extracting Fingerprint and generating LLM Summary for ${repositoryName}...`);
     return await generateSummary(prompt);
 }
