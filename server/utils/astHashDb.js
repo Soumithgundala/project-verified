@@ -33,31 +33,44 @@ async function persistDb() {
 }
 
 /**
- * Looks up a structural hash in the local clone database.
- * @param {string} hash - SHA-256 structural hash of the AST
- * @returns {{ sourceUrl: string, fileName: string, savedAt: string } | null}
+ * Looks up structural hashes in the local clone database.
+ * @param {string[]} fingerprints - Array of SHA-256 structural hashes or Winnowing integers
+ * @returns {Array} - Array of matched database entries
  */
-export async function lookupAstHash(hash) {
+export async function lookupFingerprints(fingerprints) {
   const db = await loadDb();
-  return db[hash] || null;
+  let matches = [];
+  fingerprints.forEach(fp => {
+    if (db[fp]) {
+      matches = matches.concat(db[fp]);
+    }
+  });
+  return matches;
 }
 
 /**
- * Saves a new clone entry to the local database (The Genius Move).
- * Only saves if the hash is not already known.
- * @param {string} hash - SHA-256 structural hash of the matched clone's AST
+ * Saves new clone entries to the local database (The Genius Move).
+ * @param {string[]} fingerprints - Array of hashes to save
  * @param {string} sourceUrl - The GitHub repo URL of the original source
  * @param {string} fileName - The file path that was matched
  */
-export async function saveAstHash(hash, sourceUrl, fileName) {
+export async function saveFingerprints(fingerprints, sourceUrl, fileName) {
   const db = await loadDb();
-  if (!db[hash]) {
-    db[hash] = {
-      sourceUrl,
-      fileName,
-      savedAt: new Date().toISOString()
-    };
+  let updated = false;
+
+  fingerprints.forEach(fp => {
+    if (!db[fp]) {
+      db[fp] = [];
+    }
+    // Prevent duplicate URLs for the same fingerprint
+    if (!db[fp].some(entry => entry.url === sourceUrl)) {
+      db[fp].push({ url: sourceUrl, file: fileName, addedAt: new Date().toISOString() });
+      updated = true;
+    }
+  });
+
+  if (updated) {
     await persistDb();
-    console.log(`💾 [AstHashDb] Saved new clone fingerprint → ${sourceUrl}`);
+    console.log(`💾 [AstHashDb] Saved clone fingerprints → ${sourceUrl}`);
   }
 }

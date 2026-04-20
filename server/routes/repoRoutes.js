@@ -2,7 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
 import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash } from '../utils/astRadar.js';
-import { lookupAstHash, saveAstHash } from '../utils/astHashDb.js';
+import { lookupFingerprints, saveFingerprints } from '../utils/astHashDb.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 
@@ -178,17 +178,17 @@ router.post('/link-repo', async (req, res) => {
             }
           }
 
-          const localMatch = studentHash ? await lookupAstHash(studentHash) : null;
+          const localMatches = studentHash ? await lookupFingerprints([studentHash]) : [];
 
-          if (localMatch) {
-            console.log(`🎯 [STRIKE 1 HIT] Hash matched a known clone in local DB! → ${localMatch.sourceUrl}`);
+          if (localMatches.length > 0) {
+            console.log(`🎯 [LOCAL HIT] Caught instantly in offline DB!`);
             globalOriginality = {
               status: 'Local Clone Detected',
-              matches: [localMatch.sourceUrl],
+              matches: [...new Set(localMatches.map(m => m.url))],
               similarityScore: '100.0%'
             };
           } else {
-            console.log(`🔍 [STRIKE 1 MISS] No local match. Proceeding to GitHub Global Search...`);
+            console.log(`🔍 [LOCAL MISS] Querying GitHub API...`);
             const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
             const huntResult = await huntGlobalClones(
               fingerprint.anchorString, owner, repo, headers, firstCommitDate
@@ -215,8 +215,8 @@ router.post('/link-repo', async (req, res) => {
 
                 if (parseFloat(similarity) > 90 && huntResult.matches.length > 0) {
                   const cloneHash = generateStructuralHash(cloneTree.rootNode);
-                  await saveAstHash(cloneHash, huntResult.matches[0], fingerprint.fileName);
-                  console.log(`💾 [GENIUS MOVE] Clone hash saved → future copies caught at Strike 1.`);
+                  console.log(`💾 [JIT CACHE] Learning this clone for the future...`);
+                  await saveFingerprints([cloneHash], huntResult.matches[0], fingerprint.fileName);
                 }
               }
             }
