@@ -28,6 +28,72 @@ export function generateStructuralHash(rootNode) {
 }
 
 // =================================================================
+// FAST 32-BIT INTEGER HASH (djb2 variant)
+// Used to convert our K-Grams into lightweight numbers for the DB
+// =================================================================
+function hashString(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash * 33) ^ str.charCodeAt(i);
+    }
+    return hash >>> 0; // Force to unsigned 32-bit integer
+}
+
+// =================================================================
+// WINNOWING ALGORITHM (Fuzzy Structural Hashing)
+// k = Noise Threshold (How many AST nodes make up a grammatical "sentence")
+// w = Sliding Window (How many sentences we group before picking a fingerprint)
+// =================================================================
+export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
+    // 1. Flatten the AST into a normalized sequence
+    const sequence = [];
+    function traverse(node) {
+        if (!node) return;
+        // Normalization: We ignore variable names (node.text) to defeat renaming attacks
+        sequence.push(node.type);
+        for (let i = 0; i < node.childCount; i++) {
+            traverse(node.child(i));
+        }
+    }
+    traverse(rootNode);
+
+    // If the file is incredibly tiny, just hash the whole thing
+    if (sequence.length < k) {
+        return [hashString(sequence.join(':'))];
+    }
+
+    // 2. Generate K-Grams (Overlapping chunks of size K)
+    const kGrams = [];
+    for (let i = 0; i <= sequence.length - k; i++) {
+        const chunk = sequence.slice(i, i + k).join(':');
+        kGrams.push(hashString(chunk));
+    }
+
+    // 3. Apply the Sliding Window (size W) to select Fingerprints
+    const fingerprints = new Set(); // Using a Set automatically removes duplicate fingerprints within the same file
+
+    for (let i = 0; i <= kGrams.length - w; i++) {
+        let windowMin = Infinity;
+        let windowMinIndex = -1;
+
+        // Find the minimum hash in the current window
+        // If there's a tie, we intentionally pick the right-most one (j >=) to ensure good coverage
+        for (let j = i; j < i + w; j++) {
+            if (kGrams[j] <= windowMin) {
+                windowMin = kGrams[j];
+                windowMinIndex = j;
+            }
+        }
+
+        // Add the chosen fingerprint to our global set
+        fingerprints.add(windowMin);
+    }
+
+    // Return an array of unique integer fingerprints for this file
+    return Array.from(fingerprints);
+}
+
+// =================================================================
 // RADAR: Finds the heaviest logic file in a repo and extracts:
 //   - fileName: path of the most complex file
 //   - rawCode:  the source code of that file
