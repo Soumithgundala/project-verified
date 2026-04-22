@@ -45,52 +45,61 @@ function hashString(str) {
 // w = Sliding Window (How many sentences we group before picking a fingerprint)
 // =================================================================
 export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
-    // 1. Flatten the AST into a normalized sequence
     const sequence = [];
+    
+    // 1. Traverse and record positions (Basic Normalization)
     function traverse(node) {
         if (!node) return;
-        // Normalization: We ignore variable names (node.text) to defeat renaming attacks
-        sequence.push(node.type);
+        
+        // Ignore anonymous syntax nodes (like commas/brackets) and comments
+        if (node.isNamed && node.type !== 'comment') {
+            sequence.push({
+                type: node.type,
+                start: node.startIndex, // Byte offset start
+                end: node.endIndex      // Byte offset end
+            });
+        }
         for (let i = 0; i < node.childCount; i++) {
             traverse(node.child(i));
         }
     }
     traverse(rootNode);
 
-    // If the file is incredibly tiny, just hash the whole thing
-    if (sequence.length < k) {
-        return [hashString(sequence.join(':'))];
-    }
+    if (sequence.length < k) return [];
 
-    // 2. Generate K-Grams (Overlapping chunks of size K)
+    // 2. Generate K-Grams with Start/End boundaries
     const kGrams = [];
     for (let i = 0; i <= sequence.length - k; i++) {
-        const chunk = sequence.slice(i, i + k).join(':');
-        kGrams.push(hashString(chunk));
+        const chunkTypes = sequence.slice(i, i + k).map(n => n.type).join(':');
+        kGrams.push({
+            hash: hashString(chunkTypes),
+            startPos: sequence[i].start,
+            endPos: sequence[i + k - 1].end
+        });
     }
 
-    // 3. Apply the Sliding Window (size W) to select Fingerprints
-    const fingerprints = new Set(); // Using a Set automatically removes duplicate fingerprints within the same file
+    // 3. Winnowing Window (Tie-breaker: pick the right-most minimum)
+    const fingerprints = new Map(); // Use a Map to ensure unique hashes while keeping object data
 
     for (let i = 0; i <= kGrams.length - w; i++) {
-        let windowMin = Infinity;
-        let windowMinIndex = -1;
-
-        // Find the minimum hash in the current window
-        // If there's a tie, we intentionally pick the right-most one (j >=) to ensure good coverage
-        for (let j = i; j < i + w; j++) {
-            if (kGrams[j] <= windowMin) {
-                windowMin = kGrams[j];
-                windowMinIndex = j;
+        let minGram = kGrams[i];
+        
+        for (let j = i + 1; j < i + w; j++) {
+            // Tie-breaker: <= ensures we pick the later occurrence in the window
+            if (kGrams[j].hash <= minGram.hash) {
+                minGram = kGrams[j];
             }
         }
-
-        // Add the chosen fingerprint to our global set
-        fingerprints.add(windowMin);
+        
+        // Store in Map. If hash already exists, we keep the first occurrence 
+        // (or you can choose to store an array of positions if it repeats)
+        if (!fingerprints.has(minGram.hash)) {
+            fingerprints.set(minGram.hash, minGram);
+        }
     }
 
-    // Return an array of unique integer fingerprints for this file
-    return Array.from(fingerprints);
+    // Return: [ { hash: 84729, startPos: 120, endPos: 450 }, ... ]
+    return Array.from(fingerprints.values());
 }
 
 // =================================================================

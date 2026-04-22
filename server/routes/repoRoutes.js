@@ -2,7 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
 import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash } from '../utils/astRadar.js';
-import { lookupFingerprints, saveFingerprints } from '../utils/astHashDb.js';
+import { lookupFingerprints, saveFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 
@@ -214,9 +214,14 @@ router.post('/link-repo', async (req, res) => {
                 console.log(`⚖️  [Strike 2] AST Showdown: ${similarity}% structurally identical.`);
 
                 if (parseFloat(similarity) > 90 && huntResult.matches.length > 0) {
-                  const cloneHash = generateStructuralHash(cloneTree.rootNode);
-                  console.log(`💾 [JIT CACHE] Learning this clone for the future...`);
-                  await saveFingerprints([cloneHash], huntResult.matches[0], fingerprint.fileName);
+                  console.log(`🛡️ [QUARANTINE] Sending clone to review queue. Awaiting manual approval before corpus ingestion.`);
+                  await queueForCorpusReview({
+                    sourceUrl: huntResult.matches[0],
+                    fileName: fingerprint.fileName,
+                    rawCode: huntResult.matchedCode,
+                    status: "Pending Admin Approval"
+                  });
+                  globalOriginality.status = 'Global Clone (Unverified Source)';
                 }
               }
             }

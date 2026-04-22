@@ -74,3 +74,12 @@ export async function saveFingerprints(fingerprints, sourceUrl, fileName) {
     console.log(`💾 [AstHashDb] Saved clone fingerprints → ${sourceUrl}`);
   }
 }
+
+/**
+ * Places a global clone into the review queue for manual verification
+ * before permanent ingestion into the trusted dataset.
+ */
+export async function queueForCorpusReview(reviewPayload) {
+  // In the future this writes to a Quarantine DB table
+  console.log(`⚠️ [Quarantine] Clone marked for admin review: ${reviewPayload.sourceUrl}`);
+}
