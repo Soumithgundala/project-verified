@@ -1,8 +1,9 @@
 import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
-import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash } from '../utils/astRadar.js';
+import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints } from '../utils/astRadar.js';
 import { lookupFingerprints, saveFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
+import { queryDualStore, saveToDualStore } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 
@@ -181,15 +182,32 @@ router.post('/link-repo', async (req, res) => {
           const localMatches = studentHash ? await lookupFingerprints([studentHash]) : [];
 
           if (localMatches.length > 0) {
-            console.log(`🎯 [LOCAL HIT] Caught instantly in offline DB!`);
+            console.log(`🎯 [EXACT HIT] Caught instantly in offline DB!`);
             globalOriginality = {
-              status: 'Local Clone Detected',
+              status: 'Exact Clone Detected',
               matches: [...new Set(localMatches.map(m => m.url))],
               similarityScore: '100.0%'
             };
           } else {
-            console.log(`🔍 [LOCAL MISS] Querying GitHub API...`);
-            const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
+            console.log(`🔍 [EXACT MISS] Falling back to Fuzzy Winnowing check...`);
+            let winnowingMatch = null;
+            let studentWinnowingFps = [];
+
+            if (studentTree) {
+                studentWinnowingFps = generateWinnowingFingerprints(studentTree.rootNode);
+                winnowingMatch = await queryDualStore(studentWinnowingFps);
+            }
+
+            if (winnowingMatch) {
+                console.log(`🧩 [WINNOWING HIT] Found partial containment clone: ${winnowingMatch.sourceUrl}`);
+                globalOriginality = {
+                    status: 'Partial Clone Detected',
+                    matches: [winnowingMatch.sourceUrl],
+                    similarityScore: `${winnowingMatch.containmentScore}%`
+                };
+            } else {
+                console.log(`🔍 [WINNOWING MISS] Querying GitHub API...`);
+                const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
             const huntResult = await huntGlobalClones(
               fingerprint.anchorString, owner, repo, headers, firstCommitDate
             );
@@ -225,6 +243,7 @@ router.post('/link-repo', async (req, res) => {
                 }
               }
             }
+          }
           }
         }
       } else {

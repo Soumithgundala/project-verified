@@ -47,14 +47,36 @@ function hashString(str) {
 export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
     const sequence = [];
     
-    // 1. Traverse and record positions (Basic Normalization)
+    function getNormalizedType(node) {
+        if (node.type === 'identifier' || node.type === 'property_identifier') return 'VAR';
+        if (node.type === 'number') return 'NUM';
+        if (node.type === 'string' || node.type === 'string_fragment') return 'STR';
+        if (node.type === 'true' || node.type === 'false') return 'BOOL';
+        
+        const operatorMap = {
+            '+': 'PLUS', '-': 'MINUS', '*': 'MUL', '/': 'DIV',
+            '==': 'EQ', '===': 'EQ', '!=': 'NEQ', '!==': 'NEQ',
+            '>': 'GT', '>=': 'GTE', '<': 'LT', '<=': 'LTE',
+            '&&': 'AND', '||': 'OR', '!': 'NOT', '=': 'ASSIGN'
+        };
+        if (operatorMap[node.type]) return operatorMap[node.type];
+        
+        if (node.isNamed) {
+            if (node.type === 'comment') return null;
+            if (node.type.includes('function') || node.type.includes('method') || node.type.includes('arrow')) return 'FUNC';
+            return node.type;
+        }
+        return null;
+    }
+
+    // 1. Traverse and record positions (Selective Normalization)
     function traverse(node) {
         if (!node) return;
         
-        // Ignore anonymous syntax nodes (like commas/brackets) and comments
-        if (node.isNamed && node.type !== 'comment') {
+        const normType = getNormalizedType(node);
+        if (normType) {
             sequence.push({
-                type: node.type,
+                type: normType,
                 start: node.startIndex, // Byte offset start
                 end: node.endIndex      // Byte offset end
             });
