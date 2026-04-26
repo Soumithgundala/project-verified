@@ -4,7 +4,7 @@ import multer from 'multer';
 import mammoth from 'mammoth';
 import { normalizeTechClaims } from '../utils/ai_wrapper.js';
 import { verifyTechStack } from '../utils/astRadar.js';
-import { parseGithubUrl } from './repoRoutes.js';
+import { parseGithubUrl } from '../utils/urlUtils.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });

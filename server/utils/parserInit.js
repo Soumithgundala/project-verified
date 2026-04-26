@@ -1,4 +1,9 @@
 import { Parser, Language } from 'web-tree-sitter';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // 1. Global Parser Variable
 export let parser = null;
@@ -23,10 +28,10 @@ export async function initGitPulseParser() {
     parser = new Parser();
 
     // Load all the WASM files you placed in the root folder
-    grammars.javascript = await Language.load('tree-sitter-javascript.wasm');
-    grammars.python = await Language.load('tree-sitter-python.wasm');
-    grammars.java = await Language.load('tree-sitter-java.wasm');
-    grammars.c = await Language.load('tree-sitter-c.wasm');
+    grammars.javascript = await Language.load(join(__dirname, '..', 'tree-sitter-javascript.wasm'));
+    grammars.python = await Language.load(join(__dirname, '..', 'tree-sitter-python.wasm'));
+    grammars.java = await Language.load(join(__dirname, '..', 'tree-sitter-java.wasm'));
+    grammars.c = await Language.load(join(__dirname, '..', 'tree-sitter-c.wasm'));
 
     console.log("Polyglot Engine Active: JS, Python, Java, and C grammars loaded.");
   } catch (err) {

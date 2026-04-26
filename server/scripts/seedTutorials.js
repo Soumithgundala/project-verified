@@ -1,8 +1,8 @@
 // server/scripts/seedTutorials.js
 import axios from 'axios';
-import { parser, grammars, extensionMap } from '../utils/parserInit.js';
-import { generateStructuralHash } from '../utils/astRadar.js';
-import { saveFingerprints } from '../utils/astHashDb.js';
+import { parser, grammars, extensionMap, initGitPulseParser } from '../utils/parserInit.js';
+import { generateWinnowingFingerprints } from '../utils/astRadar.js';
+import { saveToDualStore } from '../utils/fingerprintIndex.js';
 
 // Setup environment variables if .env exists
 import dotenv from 'dotenv';
@@ -17,6 +17,7 @@ const headers = GITHUB_TOKEN ? { Authorization: `token ${GITHUB_TOKEN}` } : {};
 
 async function seedDatabase(searchQuery) {
     console.log(`🌱 Seeding database with top tutorials for: "${searchQuery}"`);
+    await initGitPulseParser();
 
     try {
         // 1. Find the top 10 most starred repositories matching the tutorial query
@@ -30,12 +31,12 @@ async function seedDatabase(searchQuery) {
 
         for (const repo of repos) {
             console.log(`Processing: ${repo.full_name}...`);
-            
-            // 2. Fetch the default branch tree
-            const treeRes = await axios.get(
-                `https://api.github.com/repos/${repo.full_name}/git/trees/${repo.default_branch}?recursive=1`,
-                { headers }
-            );
+            try {
+                // 2. Fetch the default branch tree
+                const treeRes = await axios.get(
+                    `https://api.github.com/repos/${repo.full_name}/git/trees/${repo.default_branch}?recursive=1`,
+                    { headers }
+                );
 
             // 3. Find large logic files (.js, .py, etc.)
             const logicFiles = treeRes.data.tree.filter(f => 
@@ -60,17 +61,21 @@ async function seedDatabase(searchQuery) {
                         parser.setLanguage(grammars[langKey]);
                         
                         const tree = parser.parse(rawCode);
-                        if (!tree.rootNode.hasError()) {
-                            // Extract hash (Will be swapped to Winnowing later)
-                            const fileHash = generateStructuralHash(tree.rootNode);
-                            
-                            // Save to local offline database
-                            await saveFingerprints([fileHash], repo.html_url, file.path);
+                        if (!tree.rootNode.hasError) {
+                            // Extract Winnowing fingerprints
+                            const fps = generateWinnowingFingerprints(tree.rootNode);
+                            if (fps && fps.length > 0) {
+                                // Save to Dual-Store offline database
+                                await saveToDualStore(fps, repo.html_url, file.path);
+                            }
                         }
                     }
                 } catch (fileErr) {
                     console.log(`[!] Error processing file ${file.path}: ${fileErr.message}`);
                 }
+            }
+            } catch (repoErr) {
+                console.log(`[!] Error processing repository ${repo.full_name}: ${repoErr.message}`);
             }
             // Sleep to respect GitHub rate limits
             await new Promise(r => setTimeout(r, 2000)); 

@@ -6,11 +6,30 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import crypto from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '..', '.cache', '.ast_hash_db.json');
+const QUARANTINE_PATH = path.join(__dirname, '..', '.cache', '.quarantine_queue.json');
 
 let memoryCache = null; // In-memory map for 5ms lookups
+let quarantineCache = null;
+
+async function loadQuarantineDb() {
+  if (quarantineCache) return quarantineCache;
+  try {
+    const data = await fs.readFile(QUARANTINE_PATH, 'utf-8');
+    quarantineCache = JSON.parse(data);
+  } catch (err) {
+    quarantineCache = [];
+  }
+  return quarantineCache;
+}
+
+async function persistQuarantineDb() {
+  if (!quarantineCache) return;
+  await fs.writeFile(QUARANTINE_PATH, JSON.stringify(quarantineCache, null, 2), 'utf-8');
+}
 
 async function loadDb() {
   if (memoryCache) return memoryCache;
@@ -80,6 +99,31 @@ export async function saveFingerprints(fingerprints, sourceUrl, fileName) {
  * before permanent ingestion into the trusted dataset.
  */
 export async function queueForCorpusReview(reviewPayload) {
-  // In the future this writes to a Quarantine DB table
-  console.log(`⚠️ [Quarantine] Clone marked for admin review: ${reviewPayload.sourceUrl}`);
+  await loadQuarantineDb();
+  const id = crypto.randomUUID();
+  const entry = {
+    id,
+    ...reviewPayload,
+    queuedAt: new Date().toISOString()
+  };
+  quarantineCache.push(entry);
+  await persistQuarantineDb();
+  console.log(`⚠️ [Quarantine] Clone marked for admin review: ${reviewPayload.sourceUrl} (ID: ${id})`);
+  return id;
+}
+
+export async function getQuarantineQueue() {
+  await loadQuarantineDb();
+  return quarantineCache;
+}
+
+export async function getQuarantineItem(id) {
+  await loadQuarantineDb();
+  return quarantineCache.find(item => item.id === id);
+}
+
+export async function removeFromQuarantine(id) {
+  await loadQuarantineDb();
+  quarantineCache = quarantineCache.filter(item => item.id !== id);
+  await persistQuarantineDb();
 }

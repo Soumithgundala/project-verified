@@ -6,6 +6,7 @@ import { lookupFingerprints, saveFingerprints, queueForCorpusReview } from '../u
 import { queryDualStore, saveToDualStore } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
+import { parseGithubUrl } from '../utils/urlUtils.js';
 
 const router = express.Router();
 
@@ -14,10 +15,8 @@ const headers = process.env.GITHUB_TOKEN
   ? { Authorization: `token ${process.env.GITHUB_TOKEN}` }
   : {};
 
-export const parseGithubUrl = (url) => {
-  const parts = url.replace('https://github.com/', '').split('/');
-  return { owner: parts[0], repo: parts[1] };
-};
+// parseGithubUrl is now in ../utils/urlUtils.js
+export { parseGithubUrl };
 
 const MODULE_VERSIONS = {
   commits:     1, 
@@ -26,7 +25,11 @@ const MODULE_VERSIONS = {
 };
 
 router.post('/link-repo', async (req, res) => {
-  const { url } = req.body;
+  const url = req.body.url || req.body.repoUrl;
+
+  if (!url) {
+    return res.status(400).json({ success: false, message: 'Repository URL is required.' });
+  }
 
   try {
     const { owner, repo } = parseGithubUrl(url);
@@ -89,7 +92,7 @@ router.post('/link-repo', async (req, res) => {
               const treeOld = parser.parse(oldCode);
               const treeNew = parser.parse(newCode);
               
-              if (treeOld.rootNode.hasError() || treeNew.rootNode.hasError()) {
+              if (treeOld.rootNode.hasError || treeNew.rootNode.hasError) {
                   console.warn(`[!] AST Parser flagged (ERROR) nodes in commit ${c.sha}. Aborting struct measurement.`);
                   d = 0; // Abort edit distance measurement
                   cstStr = "(ERROR) Minified or Invalid Syntax Detected";
@@ -168,7 +171,7 @@ router.post('/link-repo', async (req, res) => {
               parser.setLanguage(grammars[langKey]);
               studentTree = parser.parse(fingerprint.rawCode);
               
-              if (studentTree.rootNode.hasError()) {
+              if (studentTree.rootNode.hasError) {
                   console.warn(`[!] Parser choked on ${fingerprint.fileName} (hasError). Setting parsing failure state.`);
                   globalOriginality.status = 'Parsing Failure - Minified/Invalid Syntax';
                   studentHash = null; // abort DB lookup
