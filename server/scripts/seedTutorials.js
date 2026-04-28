@@ -3,6 +3,8 @@ import axios from 'axios';
 import { parser, grammars, extensionMap, initGitPulseParser } from '../utils/parserInit.js';
 import { generateWinnowingFingerprints } from '../utils/astRadar.js';
 import { saveToDualStore } from '../utils/fingerprintIndex.js';
+import queue, { enqueueIngestion } from '../utils/ingestionQueue.js';
+
 
 // Setup environment variables if .env exists
 import dotenv from 'dotenv';
@@ -65,9 +67,12 @@ async function seedDatabase(searchQuery) {
                             // Extract Winnowing fingerprints
                             const fps = generateWinnowingFingerprints(tree.rootNode);
                             if (fps && fps.length > 0) {
-                                // Save to Dual-Store offline database
-                                await saveToDualStore(fps, repo.html_url, file.path);
+                                // Save to Dual-Store offline database via background queue
+                                await enqueueIngestion(async () => {
+                                    await saveToDualStore(fps, repo.html_url, file.path);
+                                }, `Seeding ${file.path} from ${repo.full_name}`);
                             }
+
                         }
                     }
                 } catch (fileErr) {
@@ -81,7 +86,10 @@ async function seedDatabase(searchQuery) {
             await new Promise(r => setTimeout(r, 2000)); 
         }
 
+        console.log(`⏳ Waiting for background ingestion to complete...`);
+        await queue.onIdle();
         console.log(`✅ Seeding complete. Your offline index is now smarter.`);
+
 
     } catch (err) {
         console.error("Seeding failed:", err.message);
