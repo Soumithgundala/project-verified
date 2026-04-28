@@ -3,6 +3,10 @@ import { getQuarantineQueue, getQuarantineItem, removeFromQuarantine } from '../
 import { saveToDualStore } from '../utils/fingerprintIndex.js';
 import { generateWinnowingFingerprints } from '../utils/astRadar.js';
 import { parser, grammars, extensionMap } from '../utils/parserInit.js';
+import db from '../db/database.js';
+import { enqueueIngestion } from '../utils/ingestionQueue.js';
+
+
 
 const router = express.Router();
 
@@ -51,31 +55,61 @@ router.post('/quarantine/:id/promote', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Could not generate winnowing fingerprints (file too small or noise only).' });
     }
 
-    const docId = await saveToDualStore(fingerprints, item.sourceUrl, item.fileName);
-    await removeFromQuarantine(id);
+    const jobId = await enqueueIngestion(async () => {
+        await saveToDualStore(fingerprints, item.sourceUrl, item.fileName);
+        await removeFromQuarantine(id);
+    }, `Promoting ${item.fileName} from ${item.sourceUrl}`);
 
     res.json({
       success: true,
-      message: 'Item successfully promoted to the trusted reference corpus.',
-      docId,
-      fingerprintsCount: fingerprints.length
+      message: 'Item successfully queued for promotion to the trusted reference corpus.',
+      jobId
     });
+
 
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// DELETE /api/admin/quarantine/:id/reject
-// Removes the item without promoting it.
-router.delete('/quarantine/:id/reject', async (req, res) => {
+// GET /api/admin/whitelist
+// Lists all whitelisted boilerplate hashes.
+router.get('/whitelist', async (req, res) => {
   try {
-    const { id } = req.params;
-    await removeFromQuarantine(id);
-    res.json({ success: true, message: 'Item removed from quarantine.' });
+    const rows = db.prepare('SELECT * FROM whitelisted_hashes ORDER BY added_at DESC').all();
+    res.json({ success: true, whitelist: rows });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/admin/whitelist
+// Adds a new hash to the boilerplate whitelist.
+router.post('/whitelist', async (req, res) => {
+  try {
+    const { hash, reason } = req.body;
+    if (!hash) return res.status(400).json({ success: false, message: 'Hash is required.' });
+
+    db.prepare('INSERT OR REPLACE INTO whitelisted_hashes (hash, reason, added_at) VALUES (?, ?, ?)')
+      .run(hash, reason || 'Manual addition', new Date().toISOString());
+
+    res.json({ success: true, message: `Hash ${hash} whitelisted.` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/admin/whitelist/:hash
+// Removes a hash from the whitelist.
+router.delete('/whitelist/:hash', async (req, res) => {
+  try {
+    const { hash } = req.params;
+    db.prepare('DELETE FROM whitelisted_hashes WHERE hash = ?').run(hash);
+    res.json({ success: true, message: `Hash ${hash} removed from whitelist.` });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
 export default router;
+
