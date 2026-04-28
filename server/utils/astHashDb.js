@@ -1,55 +1,6 @@
 // server/utils/astHashDb.js
-// Ultra-fast in-memory AST Hash Database, backed by a JSON file on disk.
-// Survives server restarts. Every entry is a permanent plagiarism record.
-
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import db from '../db/database.js';
 import crypto from 'crypto';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '..', '.cache', '.ast_hash_db.json');
-const QUARANTINE_PATH = path.join(__dirname, '..', '.cache', '.quarantine_queue.json');
-
-let memoryCache = null; // In-memory map for 5ms lookups
-let quarantineCache = null;
-
-async function loadQuarantineDb() {
-  if (quarantineCache) return quarantineCache;
-  try {
-    const data = await fs.readFile(QUARANTINE_PATH, 'utf-8');
-    quarantineCache = JSON.parse(data);
-  } catch (err) {
-    quarantineCache = [];
-  }
-  return quarantineCache;
-}
-
-async function persistQuarantineDb() {
-  if (!quarantineCache) return;
-  await fs.writeFile(QUARANTINE_PATH, JSON.stringify(quarantineCache, null, 2), 'utf-8');
-}
-
-async function loadDb() {
-  if (memoryCache) return memoryCache;
-  try {
-    const data = await fs.readFile(DB_PATH, 'utf-8');
-    memoryCache = JSON.parse(data);
-    const count = Object.keys(memoryCache).length;
-    console.log(`🗄️  [AstHashDb] Loaded ${count} AST hash(es) from local clone database.`);
-  } catch (err) {
-    // If file doesn't exist yet, start fresh
-    memoryCache = {};
-    console.log('🗄️  [AstHashDb] No existing clone database found — starting fresh.');
-  }
-  return memoryCache;
-}
-
-async function persistDb() {
-  if (!memoryCache) return;
-  await fs.writeFile(DB_PATH, JSON.stringify(memoryCache, null, 2), 'utf-8');
-}
 
 /**
  * Looks up structural hashes in the local clone database.
@@ -57,41 +8,54 @@ async function persistDb() {
  * @returns {Array} - Array of matched database entries
  */
 export async function lookupFingerprints(fingerprints) {
-  const db = await loadDb();
-  let matches = [];
-  fingerprints.forEach(fp => {
-    if (db[fp]) {
-      matches = matches.concat(db[fp]);
-    }
-  });
-  return matches;
+    const stmt = db.prepare('SELECT entries FROM ast_hash_db WHERE hash = ?');
+    let matches = [];
+    
+    fingerprints.forEach(fp => {
+        const row = stmt.get(fp);
+        if (row) {
+            matches = matches.concat(JSON.parse(row.entries));
+        }
+    });
+    return matches;
 }
 
 /**
- * Saves new clone entries to the local database (The Genius Move).
+ * Saves new clone entries to the local database.
  * @param {string[]} fingerprints - Array of hashes to save
  * @param {string} sourceUrl - The GitHub repo URL of the original source
  * @param {string} fileName - The file path that was matched
  */
 export async function saveFingerprints(fingerprints, sourceUrl, fileName) {
-  const db = await loadDb();
-  let updated = false;
+    const getStmt = db.prepare('SELECT entries FROM ast_hash_db WHERE hash = ?');
+    const upsertStmt = db.prepare('INSERT OR REPLACE INTO ast_hash_db (hash, entries) VALUES (?, ?)');
+    
+    const runTransaction = db.transaction((fps, url, file) => {
+        let updated = false;
+        const now = new Date().toISOString();
 
-  fingerprints.forEach(fp => {
-    if (!db[fp]) {
-      db[fp] = [];
-    }
-    // Prevent duplicate URLs for the same fingerprint
-    if (!db[fp].some(entry => entry.url === sourceUrl)) {
-      db[fp].push({ url: sourceUrl, file: fileName, addedAt: new Date().toISOString() });
-      updated = true;
-    }
-  });
+        fps.forEach(fp => {
+            const row = getStmt.get(fp);
+            let entries = row ? JSON.parse(row.entries) : [];
+            
+            // Prevent duplicate URLs for the same fingerprint
+            if (!entries.some(entry => entry.url === url)) {
+                entries.push({ url, file, addedAt: now });
+                upsertStmt.run(fp, JSON.stringify(entries));
+                updated = true;
+            }
+        });
+        return updated;
+    });
 
-  if (updated) {
-    await persistDb();
-    console.log(`💾 [AstHashDb] Saved clone fingerprints → ${sourceUrl}`);
-  }
+    try {
+        const updated = runTransaction(fingerprints, sourceUrl, fileName);
+        if (updated) {
+            console.log(`💾 [AstHashDb] Saved clone fingerprints → ${sourceUrl}`);
+        }
+    } catch (err) {
+        console.error(`❌ [AstHashDb] Failed to save fingerprints: ${err.message}`);
+    }
 }
 
 /**
@@ -99,31 +63,48 @@ export async function saveFingerprints(fingerprints, sourceUrl, fileName) {
  * before permanent ingestion into the trusted dataset.
  */
 export async function queueForCorpusReview(reviewPayload) {
-  await loadQuarantineDb();
-  const id = crypto.randomUUID();
-  const entry = {
-    id,
-    ...reviewPayload,
-    queuedAt: new Date().toISOString()
-  };
-  quarantineCache.push(entry);
-  await persistQuarantineDb();
-  console.log(`⚠️ [Quarantine] Clone marked for admin review: ${reviewPayload.sourceUrl} (ID: ${id})`);
-  return id;
+    const id = crypto.randomUUID();
+    const entry = {
+        id,
+        ...reviewPayload,
+        queuedAt: new Date().toISOString()
+    };
+    
+    try {
+        db.prepare('INSERT INTO quarantine_queue (id, payload) VALUES (?, ?)')
+          .run(id, JSON.stringify(entry));
+        console.log(`⚠️ [Quarantine] Clone marked for admin review: ${reviewPayload.sourceUrl} (ID: ${id})`);
+        return id;
+    } catch (err) {
+        console.error(`❌ [Quarantine] Failed to queue item: ${err.message}`);
+        return null;
+    }
 }
 
 export async function getQuarantineQueue() {
-  await loadQuarantineDb();
-  return quarantineCache;
+    try {
+        const rows = db.prepare('SELECT payload FROM quarantine_queue').all();
+        return rows.map(r => JSON.parse(r.payload));
+    } catch (err) {
+        console.error(`❌ [Quarantine] Failed to fetch queue: ${err.message}`);
+        return [];
+    }
 }
 
 export async function getQuarantineItem(id) {
-  await loadQuarantineDb();
-  return quarantineCache.find(item => item.id === id);
+    try {
+        const row = db.prepare('SELECT payload FROM quarantine_queue WHERE id = ?').get(id);
+        return row ? JSON.parse(row.payload) : null;
+    } catch (err) {
+        console.error(`❌ [Quarantine] Failed to fetch item: ${err.message}`);
+        return null;
+    }
 }
 
 export async function removeFromQuarantine(id) {
-  await loadQuarantineDb();
-  quarantineCache = quarantineCache.filter(item => item.id !== id);
-  await persistQuarantineDb();
+    try {
+        db.prepare('DELETE FROM quarantine_queue WHERE id = ?').run(id);
+    } catch (err) {
+        console.error(`❌ [Quarantine] Failed to remove item: ${err.message}`);
+    }
 }
