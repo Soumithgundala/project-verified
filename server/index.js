@@ -9,6 +9,7 @@ import repoRoutes from './routes/repoRoutes.js';
 import documentRoutes from './routes/documentRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { getQueueStatus } from './utils/ingestionQueue.js';
+import { resolveTenantId } from './utils/tenant.js';
 
 
 const app = express();
@@ -22,7 +23,7 @@ app.use('/api/admin', adminRoutes);
 
 // Queue Status API
 app.get('/api/queue/status', (req, res) => {
-  res.json({ success: true, ...getQueueStatus() });
+  res.json({ success: true, ...getQueueStatus({ tenantId: resolveTenantId(req) }) });
 });
 
 
