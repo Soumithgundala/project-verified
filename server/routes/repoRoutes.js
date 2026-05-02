@@ -7,6 +7,7 @@ import { queryDualStore, saveToDualStore } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 import { parseGithubUrl } from '../utils/urlUtils.js';
+import { resolveTenantId } from '../utils/tenant.js';
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ const MODULE_VERSIONS = {
 
 router.post('/link-repo', async (req, res) => {
   const url = req.body.url || req.body.repoUrl;
+  const tenantId = resolveTenantId(req);
 
   if (!url) {
     return res.status(400).json({ success: false, message: 'Repository URL is required.' });
@@ -33,7 +35,7 @@ router.post('/link-repo', async (req, res) => {
 
   try {
     const { owner, repo } = parseGithubUrl(url);
-    const cacheKey = `${owner}/${repo}`;
+    const cacheKey = `${tenantId}:${owner}/${repo}`;
 
     // ── Lightweight call: just enough to detect new commits ───────────────
     const commitsResponse = await axios.get(
@@ -182,7 +184,7 @@ router.post('/link-repo', async (req, res) => {
             }
           }
 
-          const localMatches = studentHash ? await lookupFingerprints([studentHash]) : [];
+          const localMatches = studentHash ? await lookupFingerprints([studentHash], { tenantId }) : [];
 
           if (localMatches.length > 0) {
             console.log(`🎯 [EXACT HIT] Caught instantly in offline DB!`);
@@ -198,7 +200,7 @@ router.post('/link-repo', async (req, res) => {
 
             if (studentTree) {
                 studentWinnowingFps = generateWinnowingFingerprints(studentTree.rootNode);
-                winnowingMatch = await queryDualStore(studentWinnowingFps);
+                winnowingMatch = await queryDualStore(studentWinnowingFps, { tenantId });
             }
 
             if (winnowingMatch) {
@@ -241,7 +243,7 @@ router.post('/link-repo', async (req, res) => {
                     fileName: fingerprint.fileName,
                     rawCode: huntResult.matchedCode,
                     status: "Pending Admin Approval"
-                  });
+                  }, { tenantId });
                   globalOriginality.status = 'Global Clone (Unverified Source)';
                 }
               }
