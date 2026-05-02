@@ -10,8 +10,7 @@ import documentRoutes from './routes/documentRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { getQueueStatus } from './utils/ingestionQueue.js';
 import { resolveTenantId } from './utils/tenant.js';
-
-
+import { startCleanupJob } from './jobs/cleanupJob.js';
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -32,4 +31,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, async () => {
   console.log(`Git-Pulse Engine running on port ${PORT}`);
   await initGitPulseParser();
+  startCleanupJob();
 });
