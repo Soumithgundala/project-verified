@@ -3,6 +3,7 @@ import axios from 'axios';
 import { parser, grammars, extensionMap, initGitPulseParser } from '../utils/parserInit.js';
 import { generateWinnowingFingerprints } from '../utils/astRadar.js';
 import { saveToDualStore } from '../utils/fingerprintIndex.js';
+import crypto from 'crypto';
 import queue, { enqueueIngestion } from '../utils/ingestionQueue.js';
 
 
@@ -69,7 +70,14 @@ async function seedDatabase(searchQuery) {
                             if (fps && fps.length > 0) {
                                 // Save to Dual-Store offline database via background queue
                                 await enqueueIngestion(async () => {
-                                    await saveToDualStore(fps, repo.html_url, file.path);
+                                    await saveToDualStore(fps, repo.html_url, file.path, {
+                                        sourceType: 'tutorial_seed',
+                                        verificationStatus: 'verified',
+                                        retentionPolicy: 'standard',
+                                        trustedSource: true,
+                                        sourceOrigin: 'tutorial',
+                                        exactHash: crypto.createHash('sha256').update(rawCode).digest('hex')
+                                    });
                                 }, `Seeding ${file.path} from ${repo.full_name}`);
                             }
 
