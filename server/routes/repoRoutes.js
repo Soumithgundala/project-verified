@@ -3,11 +3,13 @@ import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
 import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints } from '../utils/astRadar.js';
 import { lookupFingerprints, saveFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
-import { queryDualStore, saveToDualStore } from '../utils/fingerprintIndex.js';
+import { queryDualStore, saveToDualStore, getDetailedMatches, getDocumentsMetadata } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 import { parseGithubUrl } from '../utils/urlUtils.js';
 import { resolveTenantId } from '../utils/tenant.js';
+import { buildEvidenceMap } from '../utils/evidenceMapper.js';
+import { saveSubmission, getSubmission } from '../utils/submission.js';
 
 const router = express.Router();
 
@@ -145,6 +147,7 @@ router.post('/link-repo', async (req, res) => {
 
     let llmSummary        = cached?.llmSummary?.data  ?? null;
     let globalOriginality = cached?.originality?.data ?? null;
+    let studentWinnowingFps = cached?.originality?.studentWinnowingFps ?? [];
 
     if (needsLLMRun || needsOrigRun) {
       const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
@@ -295,14 +298,62 @@ router.post('/link-repo', async (req, res) => {
       latestSha,
       commits:     { version: MODULE_VERSIONS.commits,     rawResults: combinedResults },
       llmSummary:  { version: MODULE_VERSIONS.llmSummary,  data: llmSummary },
-      originality: { version: MODULE_VERSIONS.originality, data: globalOriginality },
+      originality: { version: MODULE_VERSIONS.originality, data: globalOriginality, studentWinnowingFps },
     });
 
-    res.json({ success: true, ...finalPayload });
+    const submissionId = await saveSubmission({
+        owner, repo, sha: latestSha,
+        studentFingerprints: studentWinnowingFps,
+        analysisResults: finalPayload,
+        tenantId
+    });
+
+    res.json({ success: true, submissionId, ...finalPayload });
 
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
+});
+
+export { parseGithubUrl };
+
+router.get('/report/:submissionId', async (req, res) => {
+    const { submissionId } = req.params;
+    const tenantId = resolveTenantId(req);
+
+    try {
+        const submission = await getSubmission(submissionId, tenantId);
+        if (!submission) {
+            return res.status(404).json({ success: false, message: 'Submission not found.' });
+        }
+
+        // 1. Get detailed matches for evidence mapping
+        const matchesByDoc = await getDetailedMatches(submission.studentFingerprints, { tenantId });
+        
+        // 2. Build the evidence map
+        const evidenceMap = buildEvidenceMap(submission.studentFingerprints, matchesByDoc);
+
+        // 3. Attach source metadata
+        const docIds = evidenceMap.sources.map(s => s.docId);
+        const meta = await getDocumentsMetadata(docIds, tenantId);
+
+        evidenceMap.sources.forEach(source => {
+            if (meta[source.docId]) {
+                source.sourceUrl = meta[source.docId].sourceUrl;
+                source.fileName = meta[source.docId].fileName;
+            }
+        });
+
+        res.json({
+            success: true,
+            submissionId,
+            repoInfo: { owner: submission.owner, repo: submission.repo, sha: submission.sha },
+            analysis: submission.analysisResults,
+            evidenceMap
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
 });
 
 export default router;
