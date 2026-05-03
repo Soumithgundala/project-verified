@@ -78,7 +78,9 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
             sequence.push({
                 type: normType,
                 start: node.startIndex, // Byte offset start
-                end: node.endIndex      // Byte offset end
+                end: node.endIndex,     // Byte offset end
+                startLine: node.startPosition.row + 1, // 1-indexed
+                endLine: node.endPosition.row + 1      // 1-indexed
             });
         }
         for (let i = 0; i < node.childCount; i++) {
@@ -96,7 +98,9 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
         kGrams.push({
             hash: hashString(chunkTypes),
             startPos: sequence[i].start,
-            endPos: sequence[i + k - 1].end
+            endPos: sequence[i + k - 1].end,
+            startLine: sequence[i].startLine,
+            endLine: sequence[i + k - 1].endLine
         });
     }
 

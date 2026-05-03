@@ -90,6 +90,8 @@ db.exec(`
         hash TEXT,
         start_pos INTEGER,
         end_pos INTEGER,
+        start_line INTEGER,
+        end_line INTEGER,
         tenant_id TEXT DEFAULT '${DEFAULT_TENANT_ID}',
         created_at TEXT,
         updated_at TEXT,
@@ -180,6 +182,21 @@ db.exec(`
         verification_status TEXT DEFAULT 'processed',
         retention_policy TEXT DEFAULT 'transient_upload'
     );
+
+    CREATE TABLE IF NOT EXISTS submissions (
+        submission_id TEXT PRIMARY KEY,
+        owner TEXT,
+        repo TEXT,
+        sha TEXT,
+        student_fingerprints TEXT, -- JSON string
+        analysis_results TEXT, -- JSON string
+        tenant_id TEXT DEFAULT '${DEFAULT_TENANT_ID}',
+        created_at TEXT,
+        updated_at TEXT,
+        source_type TEXT DEFAULT 'submission',
+        verification_status TEXT DEFAULT 'processed',
+        retention_policy TEXT DEFAULT 'long_term'
+    );
 `);
 
 function migrateTenantKeyedHashTable(tableName, createSql, copySql) {
@@ -260,7 +277,8 @@ migrateTenantKeyedHashTable(
     'quarantine_code',
     'whitelisted_hashes',
     'ingestion_jobs',
-    'upload_archives'
+    'upload_archives',
+    'submissions'
 ].forEach(hardenCoreTable);
 
 // Ensure new columns exist on older tables
@@ -269,6 +287,8 @@ addColumnIfMissing('file_metadata', 'trusted_source', 'BOOLEAN DEFAULT 0');
 addColumnIfMissing('file_metadata', 'source_origin', 'TEXT DEFAULT "unknown"');
 addColumnIfMissing('quarantine_queue', 'expires_at', 'TEXT');
 addColumnIfMissing('quarantine_code', 'expires_at', 'TEXT');
+addColumnIfMissing('fingerprint_positions', 'start_line', 'INTEGER');
+addColumnIfMissing('fingerprint_positions', 'end_line', 'INTEGER');
 
 function separateLegacyQuarantineCode() {
     const rows = db.prepare('SELECT id, payload, tenant_id, created_at FROM quarantine_queue').all();
@@ -314,6 +334,7 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_whitelist_tenant_hash ON whitelisted_hashes(tenant_id, hash);
     CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status ON ingestion_jobs(tenant_id, status);
     CREATE INDEX IF NOT EXISTS idx_upload_archives_expires_at ON upload_archives(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_submissions_tenant_repo ON submissions(tenant_id, owner, repo);
 `);
 
 export default db;
