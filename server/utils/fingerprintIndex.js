@@ -214,6 +214,7 @@ export async function getDetailedMatches(studentFingerprints, options = {}) {
             return {
                 hash: row.hash,
                 uniqueness: hashUniqueness[row.hash] || 0,
+                studentFileName: studentFp.fileName,
                 studentStart: studentFp.startPos,
                 studentEnd: studentFp.endPos,
                 studentStartLine: studentFp.startLine,
@@ -236,11 +237,11 @@ export async function getDocumentsMetadata(docIds, tenantId = DEFAULT_TENANT_ID)
     if (!docIds || docIds.length === 0) return {};
 
     const placeholders = docIds.map(() => '?').join(',');
-    const rows = db.prepare(`SELECT doc_id, source_url, file_name FROM file_metadata WHERE tenant_id = ? AND doc_id IN (${placeholders})`).all(tenantId, ...docIds);
+    const rows = db.prepare(`SELECT doc_id, source_url, file_name, source_origin FROM file_metadata WHERE tenant_id = ? AND doc_id IN (${placeholders})`).all(tenantId, ...docIds);
     
     const meta = {};
     rows.forEach(r => {
-        meta[r.doc_id] = { sourceUrl: r.source_url, fileName: r.file_name };
+        meta[r.doc_id] = { sourceUrl: r.source_url, fileName: r.file_name, sourceOrigin: r.source_origin };
     });
     return meta;
 }
