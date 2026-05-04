@@ -1,6 +1,7 @@
 // server/utils/astRadar.js
 import crypto from 'crypto';
 import axios from 'axios';
+import { parser, grammars, extensionMap } from './parserInit.js';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -44,7 +45,7 @@ function hashString(str) {
 // k = Noise Threshold (How many AST nodes make up a grammatical "sentence")
 // w = Sliding Window (How many sentences we group before picking a fingerprint)
 // =================================================================
-export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
+export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName = "unknown") {
     const sequence = [];
     
     function getNormalizedType(node) {
@@ -100,7 +101,8 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
             startPos: sequence[i].start,
             endPos: sequence[i + k - 1].end,
             startLine: sequence[i].startLine,
-            endLine: sequence[i + k - 1].endLine
+            endLine: sequence[i + k - 1].endLine,
+            fileName: fileName
         });
     }
 
@@ -130,11 +132,10 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4) {
 
 // =================================================================
 // RADAR: Finds the heaviest logic file in a repo and extracts:
-//   - fileName: path of the most complex file
 //   - rawCode:  the source code of that file
 //   - anchorString: a mid-file line used for GitHub search
 // =================================================================
-export async function extractProjectFingerprint(owner, repo, latestSha, headers) {
+export async function extractProjectFingerprints(owner, repo, latestSha, headers) {
     try {
         // 1. Get the repository file tree
         const treeResponse = await axios.get(
@@ -172,50 +173,58 @@ export async function extractProjectFingerprint(owner, repo, latestSha, headers)
 
         if (validFiles.length === 0) return null;
 
-        // 3. Download top 5 largest files and score by Logic Density
-        const topCandidates = validFiles.sort((a, b) => b.size - a.size).slice(0, 5);
-        let mostComplexFile = null;
-        let highestLogicScore = -1;
-        let targetRawCode = "";
+        // 3. Download top 10 largest files to score them properly
+        const topCandidates = validFiles.sort((a, b) => b.size - a.size).slice(0, 10);
+        const scoredFiles = [];
 
         for (const file of topCandidates) {
             const fileData = await axios.get(file.url, { headers });
             const rawCode = Buffer.from(fileData.data.content, 'base64').toString('utf-8');
 
-            // --- NEW: MINIFIED SINGLE-LINE CATCHER ---
-            // If a file is just one or two massive lines of code, it's minified. Skip it.
+            // --- MINIFIED SINGLE-LINE CATCHER ---
             const lines = rawCode.split('\n');
             if (lines.length < 5 && rawCode.length > 5000) {
                  console.log(`[!] Skipping ${file.path} - Detected minified single-line code.`);
                  continue;
             }
 
-            // Proxy for Cyclomatic Complexity — count structural keywords
-            const logicScore = (rawCode.match(/function|=>|if|for|while|switch|class|catch/g) || []).length;
+            let fileScore = 0;
+            let anchorString = null;
 
-            if (logicScore > highestLogicScore) {
-                highestLogicScore = logicScore;
-                mostComplexFile = file;
-                targetRawCode = rawCode;
+            if (parser) {
+                const fileExt = Object.keys(extensionMap).find(ext => file.path.endsWith(ext)) || '.js';
+                const langKey = extensionMap[fileExt];
+                if (grammars[langKey]) {
+                    parser.setLanguage(grammars[langKey]);
+                    const tree = parser.parse(rawCode);
+                    if (!tree.rootNode.hasError) {
+                        const nodeCount = tree.rootNode.descendantCount;
+                        const functionCount = (rawCode.match(/function|=>|class|def |class /g) || []).length;
+                        const words = rawCode.match(/\b\w+\b/g) || [];
+                        const uniqueTokens = new Set(words).size;
+                        
+                        fileScore = (nodeCount * 0.6) + (functionCount * 0.3) + (uniqueTokens * 0.1);
+                    }
+                }
+            } else {
+                 fileScore = (rawCode.match(/function|=>|if|for|while|switch|class|catch/g) || []).length * 100;
             }
+
+            // Extract "Anchor String" for GitHub global clone search (fallback)
+            const codeLines = rawCode.split('\n').map(l => l.trim()).filter(l => l.length > 25 && !l.startsWith('import') && !l.startsWith('//'));
+            anchorString = codeLines.length > 0 ? codeLines[Math.floor(codeLines.length / 2)].substring(0, 50) : null;
+
+            scoredFiles.push({
+                fileName: file.path,
+                rawCode: rawCode,
+                anchorString,
+                fileScore
+            });
         }
 
-        if (!mostComplexFile) return null;
-
-        // 4. Extract "Anchor String" for the GitHub global clone search
-        const lines = targetRawCode
-            .split('\n')
-            .map(l => l.trim())
-            .filter(l => l.length > 25 && !l.startsWith('import') && !l.startsWith('//'));
-        const anchorString = lines.length > 0
-            ? lines[Math.floor(lines.length / 2)].substring(0, 50)
-            : null;
-
-        return {
-            fileName: mostComplexFile.path,
-            rawCode: targetRawCode,
-            anchorString
-        };
+        // 4. Return top 5 files sorted by robust fileScore
+        scoredFiles.sort((a, b) => b.fileScore - a.fileScore);
+        return scoredFiles.slice(0, 5);
 
     } catch (err) {
         console.error("Fingerprint Extraction Failed:", err.message);
