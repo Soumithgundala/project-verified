@@ -12,124 +12,143 @@ function calculateMedian(values) {
 }
 
 /**
- * Merges individual fingerprint matches into continuous code segments.
- * Uses adaptive gaps and normalized continuity.
+ * Merges individual fingerprint matches into continuous code segments, strictly within file boundaries.
  */
 function mergeSegments(matches) {
     if (!matches || matches.length === 0) return [];
 
-    // Sort matches by student position to ensure we process them linearly
-    const sortedMatches = [...matches].sort((a, b) => a.studentStart - b.studentStart);
-
-    // Calculate adaptive max gap based on median distance between adjacent student matches
-    const distances = [];
-    for (let i = 1; i < sortedMatches.length; i++) {
-        distances.push(sortedMatches[i].studentStart - sortedMatches[i - 1].studentEnd);
+    // Group matches by student file name to prevent cross-file merging
+    const matchesByFile = {};
+    for (const m of matches) {
+        const file = m.studentFileName || "unknown";
+        if (!matchesByFile[file]) matchesByFile[file] = [];
+        matchesByFile[file].push(m);
     }
-    const medianGap = calculateMedian(distances);
-    const maxGap = Math.max(medianGap * 2, 50); // Ensure a reasonable minimum floor of 50 bytes
+    
+    const allSegments = [];
+    
+    for (const [file, fileMatches] of Object.entries(matchesByFile)) {
+        const sortedMatches = [...fileMatches].sort((a, b) => a.studentStart - b.studentStart);
 
-    const segments = [];
-    let current = null;
+        const distances = [];
+        for (let i = 1; i < sortedMatches.length; i++) {
+            distances.push(sortedMatches[i].studentStart - sortedMatches[i - 1].studentEnd);
+        }
+        const medianGap = calculateMedian(distances);
+        const maxGap = Math.max(medianGap * 2, 50);
 
-    for (const m of sortedMatches) {
-        if (!current) {
-            current = {
-                studentStart: m.studentStart,
-                studentEnd: m.studentEnd,
-                studentStartLine: m.studentStartLine,
-                studentEndLine: m.studentEndLine,
-                sourceStart: m.sourceStart,
-                sourceEnd: m.sourceEnd,
-                sourceStartLine: m.sourceStartLine,
-                sourceEndLine: m.sourceEndLine,
-                fingerprintCount: 1,
-                totalUniqueness: m.uniqueness || 0,
-                matches: [m] // Store matches to compute coherence later
-            };
-            continue;
+        const segments = [];
+        let current = null;
+
+        for (const m of sortedMatches) {
+            if (!current) {
+                current = {
+                    studentFileName: file,
+                    studentStart: m.studentStart,
+                    studentEnd: m.studentEnd,
+                    studentStartLine: m.studentStartLine,
+                    studentEndLine: m.studentEndLine,
+                    sourceStart: m.sourceStart,
+                    sourceEnd: m.sourceEnd,
+                    sourceStartLine: m.sourceStartLine,
+                    sourceEndLine: m.sourceEndLine,
+                    fingerprintCount: 1,
+                    totalUniqueness: m.uniqueness || 0,
+                    matches: [m]
+                };
+                continue;
+            }
+
+            const studentGap = m.studentStart - current.studentEnd;
+            const sourceGap = m.sourceStart - current.sourceEnd;
+
+            const ratio = studentGap / (Math.abs(sourceGap) + 1);
+            const isContinuous = sourceGap >= -50 && ratio >= 0.7 && ratio <= 1.3;
+            const isVeryClose = studentGap <= maxGap && Math.abs(sourceGap) <= maxGap;
+
+            if (isVeryClose || (isContinuous && studentGap <= maxGap * 3)) {
+                current.studentEnd = Math.max(current.studentEnd, m.studentEnd);
+                current.studentEndLine = Math.max(current.studentEndLine, m.studentEndLine);
+                current.sourceEnd = Math.max(current.sourceEnd, m.sourceEnd);
+                current.sourceEndLine = Math.max(current.sourceEndLine, m.sourceEndLine);
+                current.fingerprintCount++;
+                current.totalUniqueness += (m.uniqueness || 0);
+                current.matches.push(m);
+            } else {
+                segments.push(current);
+                current = {
+                    studentFileName: file,
+                    studentStart: m.studentStart,
+                    studentEnd: m.studentEnd,
+                    studentStartLine: m.studentStartLine,
+                    studentEndLine: m.studentEndLine,
+                    sourceStart: m.sourceStart,
+                    sourceEnd: m.sourceEnd,
+                    sourceStartLine: m.sourceStartLine,
+                    sourceEndLine: m.sourceEndLine,
+                    fingerprintCount: 1,
+                    totalUniqueness: m.uniqueness || 0,
+                    matches: [m]
+                };
+            }
         }
 
-        const studentGap = m.studentStart - current.studentEnd;
-        const sourceGap = m.sourceStart - current.sourceEnd;
-
-        // Normalized continuity constraint
-        // ratio = studentGap / (sourceGap + 1)
-        const ratio = studentGap / (Math.abs(sourceGap) + 1);
-        
-        // Valid continuity: ratio between 0.7 and 1.3. Also prevent large backwards jumps.
-        const isContinuous = sourceGap >= -50 && ratio >= 0.7 && ratio <= 1.3;
-
-        // Allow merging if it's perfectly continuous or just very close (e.g., adjacent tokens/statements)
-        const isVeryClose = studentGap <= maxGap && Math.abs(sourceGap) <= maxGap;
-
-        if (isVeryClose || (isContinuous && studentGap <= maxGap * 3)) {
-            // Merge
-            current.studentEnd = Math.max(current.studentEnd, m.studentEnd);
-            current.studentEndLine = Math.max(current.studentEndLine, m.studentEndLine);
-            current.sourceEnd = Math.max(current.sourceEnd, m.sourceEnd);
-            current.sourceEndLine = Math.max(current.sourceEndLine, m.sourceEndLine);
-            current.fingerprintCount++;
-            current.totalUniqueness += (m.uniqueness || 0);
-            current.matches.push(m);
-        } else {
-            segments.push(current);
-            current = {
-                studentStart: m.studentStart,
-                studentEnd: m.studentEnd,
-                studentStartLine: m.studentStartLine,
-                studentEndLine: m.studentEndLine,
-                sourceStart: m.sourceStart,
-                sourceEnd: m.sourceEnd,
-                sourceStartLine: m.sourceStartLine,
-                sourceEndLine: m.sourceEndLine,
-                fingerprintCount: 1,
-                totalUniqueness: m.uniqueness || 0,
-                matches: [m]
-            };
-        }
+        if (current) segments.push(current);
+        allSegments.push(...segments);
     }
 
-    if (current) segments.push(current);
-
-    return segments;
+    return allSegments;
 }
 
 /**
- * Computes a multi-factor confidence score for a segment.
+ * Computes multi-factor confidence and an explainability breakdown.
  */
 function computeConfidence(segment, studentFingerprints) {
     const length = segment.studentEnd - segment.studentStart;
-    if (length <= 0) return 0;
+    if (length <= 0) return { score: 0, breakdown: { density: 0, length: 0, uniqueness: 0, coherence: 0 } };
     
-    // 1. Density
-    // Expected fingerprints: roughly 1 per 50 bytes (heuristic based on winnowing)
     const expectedFps = Math.max(1, length / 50);
     const density = Math.min(1, segment.fingerprintCount / expectedFps);
 
-    // 2. Length Score
-    // Max expected block length around 5000 bytes (for scoring purposes)
     const lengthScore = Math.min(length / 5000, 1);
 
-    // 3. Uniqueness Score (IDF)
     const avgIDF = segment.fingerprintCount > 0 ? (segment.totalUniqueness / segment.fingerprintCount) : 0;
-    // Assuming max IDF is around 10 (e.g., ln(22000/1))
     const uniquenessScore = Math.min(avgIDF / 10, 1);
 
     const baseConfidence = (0.25 * density) + (0.25 * lengthScore) + (0.50 * uniquenessScore);
 
-    // 4. Segment Coherence
-    // Find how many student fingerprints actually exist within this byte range
     let possibleFpsInRange = 0;
     for (const fp of studentFingerprints) {
-        if (fp.startPos >= segment.studentStart && fp.endPos <= segment.studentEnd) {
+        if (fp.fileName === segment.studentFileName && 
+            fp.startPos >= segment.studentStart && 
+            fp.endPos <= segment.studentEnd) {
             possibleFpsInRange++;
         }
     }
     const coherence = possibleFpsInRange > 0 ? segment.fingerprintCount / possibleFpsInRange : 1;
 
-    // Final confidence is penalized by low coherence
-    return Math.min(1, baseConfidence * coherence);
+    const finalScore = Math.min(1, baseConfidence * coherence);
+
+    return {
+        score: finalScore,
+        uniquenessScore: uniquenessScore,
+        breakdown: {
+            density: parseFloat(density.toFixed(2)),
+            length: parseFloat(lengthScore.toFixed(2)),
+            uniqueness: parseFloat(uniquenessScore.toFixed(2)),
+            coherence: parseFloat(coherence.toFixed(2))
+        }
+    };
+}
+
+/**
+ * Dynamically calibrates the raw score into a UI-ready label.
+ */
+function calibrateConfidence(score, uniqueness) {
+    if (score > 0.85 && uniqueness > 0.7) return "Highly likely copied";
+    if (score > 0.65) return "Strong similarity";
+    if (score > 0.4) return "Suspicious";
+    return "Weak signal";
 }
 
 /**
@@ -137,36 +156,46 @@ function computeConfidence(segment, studentFingerprints) {
  */
 function filterNoise(segments) {
     return segments.filter(seg => 
-        seg.fingerprintCount >= 3 && // At least 3 matching fingerprints
-        (seg.studentEnd - seg.studentStart) > 30 // Block must be at least 30 bytes
+        seg.fingerprintCount >= 3 && 
+        (seg.studentEnd - seg.studentStart) > 30
     );
 }
 
 /**
- * Classifies the type of plagiarism based on overall containment and segment properties.
+ * Multi-dimensional Plagiarism Classification with strict priority ordering.
  */
-function classifyPlagiarism(containment, segments) {
-    if (containment >= 0.8) return 'FULL_CLONE';
+function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints) {
+    // 1. Full Clone Priority
+    if (projectContainment > 0.8 && dominance > 0.7) return 'FULL_CLONE';
     
-    // Check for mosaic: many small segments
-    if (segments.length >= 10) {
-        const avgLength = segments.reduce((acc, seg) => acc + (seg._studentEnd - seg._studentStart), 0) / segments.length;
-        if (avgLength < 500) return 'MOSAIC';
+    // 2. Mosaic Check
+    const segmentRatio = totalFingerprints > 0 ? (totalSegments / totalFingerprints) : 0;
+    if (uniqueSources >= 3 && totalSegments >= 8 && segmentRatio > 0.2) {
+        return 'MOSAIC';
     }
 
-    if (containment >= 0.3) return 'PARTIAL_CLONE';
+    // 3. Partial Clone Check
+    if (projectContainment > 0.4) return 'PARTIAL_CLONE';
     
-    return 'BOILERPLATE_HEAVY';
+    return 'LOW_CONFIDENCE';
 }
 
 /**
- * Ranks candidate sources by their containment score.
+ * The main Evidence Mapping algorithm with Project-Level Aggregation.
  */
-function rankSources(studentFingerprints, matchesByDoc) {
-    const totalStudentFingerprints = studentFingerprints.length;
-    if (totalStudentFingerprints === 0) return [];
+export function buildProjectReport(studentFingerprints, matchesByDoc, documentsMetadata = {}) {
+    const result = {
+        projectContainment: 0,
+        dominanceScore: 0,
+        plagiarismType: 'NONE',
+        sources: []
+    };
 
-    const sources = [];
+    if (!studentFingerprints || studentFingerprints.length === 0) return result;
+    const totalStudentFingerprints = studentFingerprints.length;
+
+    let candidateSources = [];
+    let totalRankedContainment = 0;
 
     for (const [docId, matches] of Object.entries(matchesByDoc)) {
         let segments = mergeSegments(matches);
@@ -174,77 +203,104 @@ function rankSources(studentFingerprints, matchesByDoc) {
 
         if (segments.length === 0) continue;
 
-        // Calculate confidence for each segment
-        const scoredSegments = segments.map(seg => ({
-            student: { startLine: seg.studentStartLine || 1, endLine: seg.studentEndLine || 1 },
-            source: { startLine: seg.sourceStartLine || 1, endLine: seg.sourceEndLine || 1 },
-            confidence: parseFloat(computeConfidence(seg, studentFingerprints).toFixed(2)),
-            // keeping internal metrics for classification but they won't be returned to UI
-            _studentStart: seg.studentStart,
-            _studentEnd: seg.studentEnd
-        }));
+        // Explainability and Calibration
+        const scoredSegments = segments.map(seg => {
+            const confidenceCalc = computeConfidence(seg, studentFingerprints);
+            return {
+                studentFileName: seg.studentFileName,
+                student: { startLine: seg.studentStartLine || 1, endLine: seg.studentEndLine || 1 },
+                source: { startLine: seg.sourceStartLine || 1, endLine: seg.sourceEndLine || 1 },
+                confidence: {
+                    score: parseFloat(confidenceCalc.score.toFixed(2)),
+                    label: calibrateConfidence(confidenceCalc.score, confidenceCalc.uniquenessScore),
+                    breakdown: confidenceCalc.breakdown
+                }
+            };
+        });
 
-        // Sort segments by confidence descending
-        scoredSegments.sort((a, b) => b.confidence - a.confidence);
+        // Sort segments by score
+        scoredSegments.sort((a, b) => b.confidence.score - a.confidence.score);
 
+        // Calculate Project-Level Containment contribution for this source
         const matchedFingerprintCount = matches.length; 
-        const containmentScore = parseFloat((matchedFingerprintCount / totalStudentFingerprints).toFixed(4));
+        const containmentScore = matchedFingerprintCount / totalStudentFingerprints;
 
-        sources.push({
+        // Apply False Positive Guardrail (Boilerplate)
+        let sourceOrigin = "unknown";
+        if (documentsMetadata[docId]) {
+            sourceOrigin = documentsMetadata[docId].sourceOrigin;
+        }
+        
+        let effectiveContainment = containmentScore;
+        if (sourceOrigin === 'boilerplate') {
+            // Heavily penalize boilerplate sources so they don't dominate
+            effectiveContainment *= 0.1;
+        }
+
+        candidateSources.push({
             docId,
-            containment: containmentScore,
+            sourceOrigin,
+            containment: effectiveContainment,
+            rawContainment: containmentScore, // for true containment metrics
             segments: scoredSegments
         });
+        
+        totalRankedContainment += effectiveContainment;
     }
 
-    // Sort sources by containment descending
-    sources.sort((a, b) => b.containment - a.containment);
-    return sources;
-}
-
-/**
- * The main Evidence Mapping algorithm.
- * Turns random fingerprint matches into clear, continuous copied code blocks with source attribution.
- * 
- * @param {Array} studentFingerprints - Fingerprints from the student's code
- * @param {Object} matchesByDoc - Database lookup results grouped by docId
- */
-export function buildEvidenceMap(studentFingerprints, matchesByDoc) {
-    const result = {
-        plagiarismType: 'NONE',
-        sources: []
-    };
-
-    if (studentFingerprints.length === 0) return result;
-
-    const rankedSources = rankSources(studentFingerprints, matchesByDoc);
-
-    // Limit to Top 3 Sources
-    const topSources = rankedSources.slice(0, 3);
-
-    // Overall classification is based on the top source
+    // Sort sources by effective containment
+    candidateSources.sort((a, b) => b.containment - a.containment);
+    const topSources = candidateSources.slice(0, 3);
+    
+    // Project Aggregation
     if (topSources.length > 0) {
-        result.plagiarismType = classifyPlagiarism(topSources[0].containment, topSources[0].segments);
+        // Dominance
+        const dominantSource = topSources[0];
+        result.dominanceScore = totalRankedContainment > 0 ? parseFloat((dominantSource.containment / totalRankedContainment).toFixed(2)) : 0;
+        
+        // Project Containment (union of top sources, simplified as sum of their containments due to disjoint matching usually, but capped at 1.0)
+        let uniqueMatchedFingerprints = new Set();
+        for (const source of topSources) {
+            const matches = matchesByDoc[source.docId] || [];
+            for (const m of matches) uniqueMatchedFingerprints.add(m.hash);
+        }
+        result.projectContainment = parseFloat((uniqueMatchedFingerprints.size / totalStudentFingerprints).toFixed(2));
+
+        // Plagiarism Classification
+        const uniqueSourcesCount = topSources.length;
+        let totalSegmentsCount = 0;
+        for (const s of topSources) totalSegmentsCount += s.segments.length;
+
+        // Exclude boilerplate from FULL_CLONE trigger by checking dominant source origin
+        if (dominantSource.sourceOrigin === 'boilerplate') {
+            result.plagiarismType = 'BOILERPLATE_HEAVY';
+        } else {
+            result.plagiarismType = classifyPlagiarism(
+                result.projectContainment, 
+                result.dominanceScore, 
+                uniqueSourcesCount, 
+                totalSegmentsCount, 
+                totalStudentFingerprints
+            );
+        }
     }
 
+    // Compress Evidence Payload for UI
     for (const source of topSources) {
-        // Safe Evidence Compression
-        const topSegments = source.segments.slice(0, 5).map(seg => ({
-            student: seg.student,
-            source: seg.source,
-            confidence: seg.confidence
-        }));
-
+        const topSegments = source.segments.slice(0, 5);
         const restSegments = source.segments.slice(5);
+        
         let avgConfidence = 0;
         if (restSegments.length > 0) {
-            const sum = restSegments.reduce((acc, seg) => acc + seg.confidence, 0);
+            const sum = restSegments.reduce((acc, seg) => acc + seg.confidence.score, 0);
             avgConfidence = parseFloat((sum / restSegments.length).toFixed(2));
         }
 
         result.sources.push({
             docId: source.docId,
-            containment: Math.round(source.containment * 100), // Return as percentage for UI
+            sourceUrl: documentsMetadata[source.docId]?.sourceUrl || "unknown",
+            fileName: documentsMetadata[source.docId]?.fileName || "unknown",
+            containment: Math.round(source.rawContainment * 100),
             topSegments: topSegments,
             otherMatches: {
                 count: restSegments.length,
@@ -252,6 +308,10 @@ export function buildEvidenceMap(studentFingerprints, matchesByDoc) {
             }
         });
     }
+
+    // Scale final containments
+    result.projectContainment = Math.round(result.projectContainment * 100);
+    result.dominanceScore = Math.round(result.dominanceScore * 100);
 
     return result;
 }

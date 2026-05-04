@@ -1,14 +1,14 @@
 import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
-import { extractProjectFingerprint, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints } from '../utils/astRadar.js';
+import { extractProjectFingerprints, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints } from '../utils/astRadar.js';
 import { lookupFingerprints, saveFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
 import { queryDualStore, saveToDualStore, getDetailedMatches, getDocumentsMetadata } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 import { parseGithubUrl } from '../utils/urlUtils.js';
 import { resolveTenantId } from '../utils/tenant.js';
-import { buildEvidenceMap } from '../utils/evidenceMapper.js';
+import { buildProjectReport } from '../utils/evidenceMapper.js';
 import { saveSubmission, getSubmission } from '../utils/submission.js';
 
 const router = express.Router();
@@ -150,12 +150,13 @@ router.post('/link-repo', async (req, res) => {
     let studentWinnowingFps = cached?.originality?.studentWinnowingFps ?? [];
 
     if (needsLLMRun || needsOrigRun) {
-      const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
+      const fingerprints = await extractProjectFingerprints(owner, repo, latestSha, headers);
+      const mainFingerprint = fingerprints && fingerprints.length > 0 ? fingerprints[0] : null;
 
       if (needsLLMRun) {
         console.log(`🔄 [RERUN] LLM Summary module for ${cacheKey}`);
-        llmSummary = fingerprint
-          ? await generateLLMSummary(fingerprint.fileName, fingerprint.rawCode)
+        llmSummary = mainFingerprint
+          ? await generateLLMSummary(mainFingerprint.fileName, mainFingerprint.rawCode)
           : { overall_logic_summary: "No substantial logic files found.", key_patterns: [], likely_source: "Unknown" };
       } else {
         console.log(`🟢 [CACHE] LLM Summary module valid for ${cacheKey}`);
@@ -165,44 +166,57 @@ router.post('/link-repo', async (req, res) => {
         console.log(`🔄 [RERUN] Originality module (Two-Strike) for ${cacheKey}`);
         globalOriginality = { status: 'Original', matches: [], similarityScore: null };
 
-        if (fingerprint) {
-          let studentTree = null;
-          let studentHash = null;
+        if (fingerprints && fingerprints.length > 0) {
+          let hasParsingFailure = false;
+          let localExactMatches = [];
+          studentWinnowingFps = [];
+          
+          for (const fp of fingerprints) {
+            let studentTree = null;
+            let studentHash = null;
 
-          if (parser) {
-            const fileExt = Object.keys(extensionMap).find(ext => fingerprint.fileName.endsWith(ext)) || '.js';
-            const langKey = extensionMap[fileExt];
-            if (grammars[langKey]) {
-              parser.setLanguage(grammars[langKey]);
-              studentTree = parser.parse(fingerprint.rawCode);
-              
-              if (studentTree.rootNode.hasError) {
-                  console.warn(`[!] Parser choked on ${fingerprint.fileName} (hasError). Setting parsing failure state.`);
-                  globalOriginality.status = 'Parsing Failure - Minified/Invalid Syntax';
-                  studentHash = null; // abort DB lookup
-              } else {
-                  studentHash = generateStructuralHash(studentTree.rootNode);
-                  console.log(`🔑 [Strike 1] Student AST hash: ${studentHash.substring(0, 12)}...`);
+            if (parser) {
+              const fileExt = Object.keys(extensionMap).find(ext => fp.fileName.endsWith(ext)) || '.js';
+              const langKey = extensionMap[fileExt];
+              if (grammars[langKey]) {
+                parser.setLanguage(grammars[langKey]);
+                studentTree = parser.parse(fp.rawCode);
+                
+                if (studentTree.rootNode.hasError) {
+                    console.warn(`[!] Parser choked on ${fp.fileName} (hasError).`);
+                    hasParsingFailure = true;
+                } else {
+                    studentHash = generateStructuralHash(studentTree.rootNode);
+                    console.log(`🔑 [Strike 1] Student AST hash for ${fp.fileName}: ${studentHash.substring(0, 12)}...`);
+                    
+                    const fps = generateWinnowingFingerprints(studentTree.rootNode, 15, 40, fp.fileName);
+                    studentWinnowingFps.push(...fps);
+                }
               }
+            }
+
+            if (studentHash) {
+                const matches = await lookupFingerprints([studentHash], { tenantId });
+                localExactMatches.push(...matches);
             }
           }
 
-          const localMatches = studentHash ? await lookupFingerprints([studentHash], { tenantId }) : [];
+          if (hasParsingFailure && localExactMatches.length === 0) {
+             globalOriginality.status = 'Parsing Failure - Minified/Invalid Syntax';
+          }
 
-          if (localMatches.length > 0) {
+          if (localExactMatches.length > 0) {
             console.log(`🎯 [EXACT HIT] Caught instantly in offline DB!`);
             globalOriginality = {
               status: 'Exact Clone Detected',
-              matches: [...new Set(localMatches.map(m => m.url))],
+              matches: [...new Set(localExactMatches.map(m => m.url))],
               similarityScore: '100.0%'
             };
           } else {
             console.log(`🔍 [EXACT MISS] Falling back to Fuzzy Winnowing check...`);
             let winnowingMatch = null;
-            let studentWinnowingFps = [];
 
-            if (studentTree) {
-                studentWinnowingFps = generateWinnowingFingerprints(studentTree.rootNode);
+            if (studentWinnowingFps.length > 0) {
                 winnowingMatch = await queryDualStore(studentWinnowingFps, { tenantId });
             }
 
@@ -213,46 +227,48 @@ router.post('/link-repo', async (req, res) => {
                     matches: [winnowingMatch.sourceUrl],
                     similarityScore: `${winnowingMatch.containmentScore}%`
                 };
-            } else {
+            } else if (mainFingerprint) {
                 console.log(`🔍 [WINNOWING MISS] Querying GitHub API...`);
                 const firstCommitDate = fetchedCommits[fetchedCommits.length - 1]?.commit?.author?.date || null;
-            const huntResult = await huntGlobalClones(
-              fingerprint.anchorString, owner, repo, headers, firstCommitDate
-            );
+                const huntResult = await huntGlobalClones(
+                  mainFingerprint.anchorString, owner, repo, headers, firstCommitDate
+                );
 
-            globalOriginality.status  = huntResult.status;
-            globalOriginality.matches = huntResult.matches;
+                globalOriginality.status  = huntResult.status;
+                globalOriginality.matches = huntResult.matches;
 
-            if (huntResult.matchedCode && parser && studentTree) {
-              const fileExt = Object.keys(extensionMap).find(ext => fingerprint.fileName.endsWith(ext)) || '.js';
-              const langKey = extensionMap[fileExt];
-              if (grammars[langKey]) {
-                parser.setLanguage(grammars[langKey]);
-                const cloneTree = parser.parse(huntResult.matchedCode);
+                if (huntResult.matchedCode && parser) {
+                  const fileExt = Object.keys(extensionMap).find(ext => mainFingerprint.fileName.endsWith(ext)) || '.js';
+                  const langKey = extensionMap[fileExt];
+                  if (grammars[langKey]) {
+                    parser.setLanguage(grammars[langKey]);
+                    const studentTree = parser.parse(mainFingerprint.rawCode);
+                    const cloneTree = parser.parse(huntResult.matchedCode);
 
-                const studentNodes = studentTree.rootNode.descendantCount;
-                const cloneNodes   = cloneTree.rootNode.descendantCount;
-                const distance     = Math.abs(studentNodes - cloneNodes);
-                const maxNodes     = Math.max(studentNodes, cloneNodes);
-                const similarity   = maxNodes > 0 ? ((1 - (distance / maxNodes)) * 100).toFixed(1) : 0;
+                    const studentNodes = studentTree.rootNode.descendantCount;
+                    const cloneNodes   = cloneTree.rootNode.descendantCount;
+                    const distance     = Math.abs(studentNodes - cloneNodes);
+                    const maxNodes     = Math.max(studentNodes, cloneNodes);
+                    const similarity   = maxNodes > 0 ? ((1 - (distance / maxNodes)) * 100).toFixed(1) : 0;
 
-                globalOriginality.similarityScore = `${similarity}%`;
-                console.log(`⚖️  [Strike 2] AST Showdown: ${similarity}% structurally identical.`);
+                    globalOriginality.similarityScore = `${similarity}%`;
+                    console.log(`⚖️  [Strike 2] AST Showdown: ${similarity}% structurally identical.`);
 
-                if (parseFloat(similarity) > 90 && huntResult.matches.length > 0) {
-                  console.log(`🛡️ [QUARANTINE] Sending clone to review queue. Awaiting manual approval before corpus ingestion.`);
-                  await queueForCorpusReview({
-                    sourceUrl: huntResult.matches[0],
-                    fileName: fingerprint.fileName,
-                    rawCode: huntResult.matchedCode,
-                    status: "Pending Admin Approval"
-                  }, { tenantId });
-                  globalOriginality.status = 'Global Clone (Unverified Source)';
+                    if (parseFloat(similarity) > 90 && huntResult.matches.length > 0) {
+                      console.log(`🛡️ [QUARANTINE] Sending clone to review queue. Awaiting manual approval before corpus ingestion.`);
+                      await queueForCorpusReview({
+                        sourceUrl: huntResult.matches[0],
+                        fileName: mainFingerprint.fileName,
+                        rawCode: huntResult.matchedCode,
+                        status: "Pending Admin Approval"
+                      }, { tenantId });
+                      globalOriginality.status = 'Global Clone (Unverified Source)';
+                    }
+                  }
                 }
-              }
             }
           }
-          }
+
         }
       } else {
         console.log(`🟢 [CACHE] Originality module valid for ${cacheKey}`);
@@ -330,26 +346,19 @@ router.get('/report/:submissionId', async (req, res) => {
         // 1. Get detailed matches for evidence mapping
         const matchesByDoc = await getDetailedMatches(submission.studentFingerprints, { tenantId });
         
-        // 2. Build the evidence map
-        const evidenceMap = buildEvidenceMap(submission.studentFingerprints, matchesByDoc);
-
-        // 3. Attach source metadata
-        const docIds = evidenceMap.sources.map(s => s.docId);
+        // 2. Fetch metadata for all matched documents
+        const docIds = Object.keys(matchesByDoc);
         const meta = await getDocumentsMetadata(docIds, tenantId);
 
-        evidenceMap.sources.forEach(source => {
-            if (meta[source.docId]) {
-                source.sourceUrl = meta[source.docId].sourceUrl;
-                source.fileName = meta[source.docId].fileName;
-            }
-        });
+        // 3. Build the project-level evidence report
+        const evidenceReport = buildProjectReport(submission.studentFingerprints, matchesByDoc, meta);
 
         res.json({
             success: true,
             submissionId,
             repoInfo: { owner: submission.owner, repo: submission.repo, sha: submission.sha },
             analysis: submission.analysisResults,
-            evidenceMap
+            evidenceReport
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
