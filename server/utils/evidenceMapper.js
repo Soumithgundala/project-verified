@@ -161,21 +161,62 @@ function filterNoise(segments) {
     );
 }
 
+function validateSegmentMapping(segment) {
+    const warnings = [];
+    if (segment.studentStart > segment.studentEnd) warnings.push('student_range_inverted');
+    if (segment.sourceStart > segment.sourceEnd) warnings.push('source_range_inverted');
+    if ((segment.studentStartLine || 0) > (segment.studentEndLine || 0)) warnings.push('student_lines_inverted');
+    if ((segment.sourceStartLine || 0) > (segment.sourceEndLine || 0)) warnings.push('source_lines_inverted');
+
+    for (const match of segment.matches || []) {
+        const insideStudentRange = match.studentStart >= segment.studentStart && match.studentEnd <= segment.studentEnd;
+        const insideSourceRange = match.sourceStart >= segment.sourceStart && match.sourceEnd <= segment.sourceEnd;
+        if (!insideStudentRange || !insideSourceRange) {
+            warnings.push('match_outside_merged_range');
+            break;
+        }
+    }
+
+    return {
+        passed: warnings.length === 0,
+        warnings
+    };
+}
+
+const MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION = 25;
+const env = globalThis.process?.env || {};
+const CALIBRATION = {
+    fullCloneContainment: Number(env.GP_FULL_CLONE_CONTAINMENT || 0.8),
+    fullCloneDominance: Number(env.GP_FULL_CLONE_DOMINANCE || 0.7),
+    mosaicMinSources: Number(env.GP_MOSAIC_MIN_SOURCES || 3),
+    mosaicMinSegments: Number(env.GP_MOSAIC_MIN_SEGMENTS || 8),
+    mosaicSegmentRatio: Number(env.GP_MOSAIC_SEGMENT_RATIO || 0.2),
+    partialCloneContainment: Number(env.GP_PARTIAL_CLONE_CONTAINMENT || 0.4)
+};
+
 /**
  * Multi-dimensional Plagiarism Classification with strict priority ordering.
  */
-function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints) {
+function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints, totalMatchedFingerprints) {
+    if (totalMatchedFingerprints < MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION) {
+        return 'LOW_CONFIDENCE';
+    }
+
     // 1. Full Clone Priority
-    if (projectContainment > 0.8 && dominance > 0.7) return 'FULL_CLONE';
+    if (projectContainment > CALIBRATION.fullCloneContainment && dominance > CALIBRATION.fullCloneDominance) return 'FULL_CLONE';
     
     // 2. Mosaic Check
     const segmentRatio = totalFingerprints > 0 ? (totalSegments / totalFingerprints) : 0;
-    if (uniqueSources >= 3 && totalSegments >= 8 && segmentRatio > 0.2) {
+    if (
+        uniqueSources >= CALIBRATION.mosaicMinSources &&
+        totalSegments >= CALIBRATION.mosaicMinSegments &&
+        segmentRatio > CALIBRATION.mosaicSegmentRatio
+    ) {
         return 'MOSAIC';
     }
 
     // 3. Partial Clone Check
-    if (projectContainment > 0.4) return 'PARTIAL_CLONE';
+    if (projectContainment > CALIBRATION.partialCloneContainment) return 'PARTIAL_CLONE';
     
     return 'LOW_CONFIDENCE';
 }
@@ -188,6 +229,9 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         projectContainment: 0,
         dominanceScore: 0,
         plagiarismType: 'NONE',
+        totalMatchedFingerprints: 0,
+        minimumEvidenceThreshold: MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION,
+        calibration: CALIBRATION,
         sources: []
     };
 
@@ -210,6 +254,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
                 studentFileName: seg.studentFileName,
                 student: { startLine: seg.studentStartLine || 1, endLine: seg.studentEndLine || 1 },
                 source: { startLine: seg.sourceStartLine || 1, endLine: seg.sourceEndLine || 1 },
+                mappingValidation: validateSegmentMapping(seg),
                 confidence: {
                     score: parseFloat(confidenceCalc.score.toFixed(2)),
                     label: calibrateConfidence(confidenceCalc.score, confidenceCalc.uniquenessScore),
@@ -265,6 +310,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
             for (const m of matches) uniqueMatchedFingerprints.add(m.hash);
         }
         result.projectContainment = parseFloat((uniqueMatchedFingerprints.size / totalStudentFingerprints).toFixed(2));
+        result.totalMatchedFingerprints = uniqueMatchedFingerprints.size;
 
         // Plagiarism Classification
         const uniqueSourcesCount = topSources.length;
@@ -280,7 +326,8 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
                 result.dominanceScore, 
                 uniqueSourcesCount, 
                 totalSegmentsCount, 
-                totalStudentFingerprints
+                totalStudentFingerprints,
+                result.totalMatchedFingerprints
             );
         }
     }
