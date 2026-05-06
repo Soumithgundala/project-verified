@@ -197,6 +197,21 @@ db.exec(`
         verification_status TEXT DEFAULT 'processed',
         retention_policy TEXT DEFAULT 'long_term'
     );
+
+    CREATE TABLE IF NOT EXISTS review_overrides (
+        override_id TEXT PRIMARY KEY,
+        submission_id TEXT,
+        action TEXT,
+        source_url TEXT,
+        reason TEXT,
+        tenant_id TEXT DEFAULT '${DEFAULT_TENANT_ID}',
+        created_at TEXT,
+        updated_at TEXT,
+        source_type TEXT DEFAULT 'human_review',
+        verification_status TEXT DEFAULT 'reviewed',
+        retention_policy TEXT DEFAULT 'long_term',
+        FOREIGN KEY (submission_id) REFERENCES submissions(submission_id) ON DELETE CASCADE
+    );
 `);
 
 function migrateTenantKeyedHashTable(tableName, createSql, copySql) {
@@ -278,7 +293,8 @@ migrateTenantKeyedHashTable(
     'whitelisted_hashes',
     'ingestion_jobs',
     'upload_archives',
-    'submissions'
+    'submissions',
+    'review_overrides'
 ].forEach(hardenCoreTable);
 
 // Ensure new columns exist on older tables
@@ -335,6 +351,7 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status ON ingestion_jobs(tenant_id, status);
     CREATE INDEX IF NOT EXISTS idx_upload_archives_expires_at ON upload_archives(expires_at);
     CREATE INDEX IF NOT EXISTS idx_submissions_tenant_repo ON submissions(tenant_id, owner, repo);
+    CREATE INDEX IF NOT EXISTS idx_review_overrides_submission ON review_overrides(tenant_id, submission_id);
 `);
 
 export default db;
