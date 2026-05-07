@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import db from '../db/database.js';
 import { DEFAULT_TENANT_ID } from './tenant.js';
 
+export const MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_MATCH = 25;
+
 /**
  * Saves Winnowing fingerprints to the SQLite database.
  * Prevents duplicating identical documents.
@@ -111,8 +113,8 @@ export async function queryDualStore(studentFingerprints, options = {}) {
         }
     });
 
-    // 2. Threshold Filtering (Ignore docs matching < 5 fingerprints to avoid random collisions)
-    const validDocIds = Object.keys(candidateMatches).filter(id => candidateMatches[id] >= 5);
+    // 2. Threshold Filtering: fewer than 25 matches is evidence for review, not a confident accusation.
+    const validDocIds = Object.keys(candidateMatches).filter(id => candidateMatches[id] >= MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_MATCH);
     
     if (validDocIds.length === 0) return null;
 
