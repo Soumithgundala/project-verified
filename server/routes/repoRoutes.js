@@ -2,20 +2,21 @@ import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
 import { extractProjectFingerprints, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints } from '../utils/astRadar.js';
-import { lookupFingerprints, saveFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
-import { queryDualStore, saveToDualStore, getDetailedMatches, getDocumentsMetadata } from '../utils/fingerprintIndex.js';
+import { lookupFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
+import { queryDualStore, getDetailedMatches, getDocumentsMetadata } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
 import { parser, grammars, extensionMap, splitDiff } from '../utils/parserInit.js';
 import { parseGithubUrl } from '../utils/urlUtils.js';
 import { resolveTenantId } from '../utils/tenant.js';
 import { buildProjectReport } from '../utils/evidenceMapper.js';
-import { saveSubmission, getSubmission } from '../utils/submission.js';
+import { saveSubmission, getSubmission, saveReviewOverride, listReviewOverrides } from '../utils/submission.js';
 
 const router = express.Router();
 
 const GITHUB_API_BASE = "https://api.github.com";
-const headers = process.env.GITHUB_TOKEN
-  ? { Authorization: `token ${process.env.GITHUB_TOKEN}` }
+const env = globalThis.process?.env || {};
+const headers = env.GITHUB_TOKEN
+  ? { Authorization: `token ${env.GITHUB_TOKEN}` }
   : {};
 
 // parseGithubUrl is now in ../utils/urlUtils.js
@@ -24,8 +25,43 @@ export { parseGithubUrl };
 const MODULE_VERSIONS = {
   commits:     1, 
   llmSummary:  1,
-  originality: 3,
+  originality: 4,
 };
+
+function extractWinnowingForFiles(fingerprints) {
+  const studentWinnowingFps = [];
+  let hasParsingFailure = false;
+  let localExactHashes = [];
+
+  for (const fp of fingerprints || []) {
+    let studentTree = null;
+    let studentHash = null;
+
+    if (parser) {
+      const fileExt = Object.keys(extensionMap).find(ext => fp.fileName.endsWith(ext)) || '.js';
+      const langKey = extensionMap[fileExt];
+      if (grammars[langKey]) {
+        parser.setLanguage(grammars[langKey]);
+        studentTree = parser.parse(fp.rawCode);
+
+        if (studentTree.rootNode.hasError) {
+          console.warn(`[!] Parser choked on ${fp.fileName} (hasError).`);
+          hasParsingFailure = true;
+        } else {
+          studentHash = generateStructuralHash(studentTree.rootNode);
+          console.log(`[Strike 1] Student AST hash for ${fp.fileName}: ${studentHash.substring(0, 12)}...`);
+
+          const fps = generateWinnowingFingerprints(studentTree.rootNode, 15, 40, fp.fileName);
+          studentWinnowingFps.push(...fps);
+        }
+      }
+    }
+
+    if (studentHash) localExactHashes.push(studentHash);
+  }
+
+  return { studentWinnowingFps, hasParsingFailure, localExactHashes };
+}
 
 router.post('/link-repo', async (req, res) => {
   const url = req.body.url || req.body.repoUrl;
@@ -220,7 +256,42 @@ router.post('/link-repo', async (req, res) => {
                 winnowingMatch = await queryDualStore(studentWinnowingFps, { tenantId });
             }
 
-            if (winnowingMatch) {
+            const projectContainment = winnowingMatch ? winnowingMatch.containmentScore / 100 : 0;
+            if (projectContainment < 0.3) {
+                console.log(`[LIGHT SCAN] Project containment below 30%. Scanning next 5 logic files.`);
+                const fallbackFingerprints = await extractProjectFingerprints(owner, repo, latestSha, headers, {
+                  candidateLimit: 15,
+                  offset: 5,
+                  limit: 5,
+                  lightweight: true
+                });
+
+                if (fallbackFingerprints && fallbackFingerprints.length > 0) {
+                  const fallbackExtraction = extractWinnowingForFiles(fallbackFingerprints);
+                  hasParsingFailure = hasParsingFailure || fallbackExtraction.hasParsingFailure;
+                  studentWinnowingFps.push(...fallbackExtraction.studentWinnowingFps);
+
+                  for (const studentHash of fallbackExtraction.localExactHashes) {
+                    const matches = await lookupFingerprints([studentHash], { tenantId });
+                    localExactMatches.push(...matches);
+                  }
+
+                  if (localExactMatches.length > 0) {
+                    console.log(`[EXACT HIT] Caught in lightweight fallback scan.`);
+                    globalOriginality = {
+                      status: 'Exact Clone Detected',
+                      matches: [...new Set(localExactMatches.map(m => m.url))],
+                      similarityScore: '100.0%'
+                    };
+                  } else if (studentWinnowingFps.length > 0) {
+                    winnowingMatch = await queryDualStore(studentWinnowingFps, { tenantId });
+                  }
+                }
+            }
+
+            if (globalOriginality.status === 'Exact Clone Detected') {
+                // Resolved by the lightweight fallback exact-hash pass.
+            } else if (winnowingMatch) {
                 console.log(`🧩 [WINNOWING HIT] Found partial containment clone: ${winnowingMatch.sourceUrl}`);
                 globalOriginality = {
                     status: 'Partial Clone Detected',
@@ -331,8 +402,6 @@ router.post('/link-repo', async (req, res) => {
   }
 });
 
-export { parseGithubUrl };
-
 router.get('/report/:submissionId', async (req, res) => {
     const { submissionId } = req.params;
     const tenantId = resolveTenantId(req);
@@ -352,14 +421,60 @@ router.get('/report/:submissionId', async (req, res) => {
 
         // 3. Build the project-level evidence report
         const evidenceReport = buildProjectReport(submission.studentFingerprints, matchesByDoc, meta);
+        const humanOverrides = await listReviewOverrides(submissionId, tenantId);
+        const ignoredSources = new Set(
+            humanOverrides
+                .filter(override => override.action === 'ignore_source' && override.sourceUrl)
+                .map(override => override.sourceUrl)
+        );
+        if (ignoredSources.size > 0) {
+            evidenceReport.sources = evidenceReport.sources.filter(source => !ignoredSources.has(source.sourceUrl));
+        }
+
+        const latestSubmissionOverride = humanOverrides.find(override =>
+            override.action === 'mark_plagiarism' || override.action === 'mark_acceptable'
+        );
+        if (latestSubmissionOverride) {
+            evidenceReport.humanOverride = latestSubmissionOverride;
+            evidenceReport.plagiarismType = latestSubmissionOverride.action === 'mark_plagiarism'
+                ? 'HUMAN_CONFIRMED_PLAGIARISM'
+                : 'HUMAN_MARKED_ACCEPTABLE';
+        }
 
         res.json({
             success: true,
             submissionId,
             repoInfo: { owner: submission.owner, repo: submission.repo, sha: submission.sha },
             analysis: submission.analysisResults,
-            evidenceReport
+            evidenceReport,
+            humanOverrides
         });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+router.post('/submissions/:submissionId/override', async (req, res) => {
+    const { submissionId } = req.params;
+    const tenantId = resolveTenantId(req);
+    const { action, sourceUrl = null, reason = null } = req.body || {};
+    const validActions = new Set(['mark_plagiarism', 'mark_acceptable', 'ignore_source']);
+
+    try {
+        if (!validActions.has(action)) {
+            return res.status(400).json({ success: false, message: 'Invalid override action.' });
+        }
+        if (action === 'ignore_source' && !sourceUrl) {
+            return res.status(400).json({ success: false, message: 'sourceUrl is required when ignoring a source.' });
+        }
+
+        const submission = await getSubmission(submissionId, tenantId);
+        if (!submission) {
+            return res.status(404).json({ success: false, message: 'Submission not found.' });
+        }
+
+        const override = await saveReviewOverride({ submissionId, action, sourceUrl, reason, tenantId });
+        res.json({ success: true, override });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
