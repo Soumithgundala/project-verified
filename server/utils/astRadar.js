@@ -135,8 +135,15 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName 
 //   - rawCode:  the source code of that file
 //   - anchorString: a mid-file line used for GitHub search
 // =================================================================
-export async function extractProjectFingerprints(owner, repo, latestSha, headers) {
+export async function extractProjectFingerprints(owner, repo, latestSha, headers, options = {}) {
     try {
+        const {
+            candidateLimit = 10,
+            limit = 5,
+            offset = 0,
+            lightweight = false
+        } = options;
+
         // 1. Get the repository file tree
         const treeResponse = await axios.get(
             `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${latestSha}?recursive=1`,
@@ -173,8 +180,8 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
 
         if (validFiles.length === 0) return null;
 
-        // 3. Download top 10 largest files to score them properly
-        const topCandidates = validFiles.sort((a, b) => b.size - a.size).slice(0, 10);
+        // 3. Download candidate files to score them properly
+        const topCandidates = validFiles.sort((a, b) => b.size - a.size).slice(0, candidateLimit);
         const scoredFiles = [];
 
         for (const file of topCandidates) {
@@ -210,9 +217,11 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
                  fileScore = (rawCode.match(/function|=>|if|for|while|switch|class|catch/g) || []).length * 100;
             }
 
-            // Extract "Anchor String" for GitHub global clone search (fallback)
-            const codeLines = rawCode.split('\n').map(l => l.trim()).filter(l => l.length > 25 && !l.startsWith('import') && !l.startsWith('//'));
-            anchorString = codeLines.length > 0 ? codeLines[Math.floor(codeLines.length / 2)].substring(0, 50) : null;
+            if (!lightweight) {
+                // Extract "Anchor String" for GitHub global clone search (fallback)
+                const codeLines = rawCode.split('\n').map(l => l.trim()).filter(l => l.length > 25 && !l.startsWith('import') && !l.startsWith('//'));
+                anchorString = codeLines.length > 0 ? codeLines[Math.floor(codeLines.length / 2)].substring(0, 50) : null;
+            }
 
             scoredFiles.push({
                 fileName: file.path,
@@ -222,9 +231,9 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
             });
         }
 
-        // 4. Return top 5 files sorted by robust fileScore
+        // 4. Return requested window sorted by robust fileScore
         scoredFiles.sort((a, b) => b.fileScore - a.fileScore);
-        return scoredFiles.slice(0, 5);
+        return scoredFiles.slice(offset, offset + limit);
 
     } catch (err) {
         console.error("Fingerprint Extraction Failed:", err.message);
