@@ -1,14 +1,56 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
 } from 'recharts';
 import { 
   ShieldCheck, ShieldAlert, CheckCircle, Users, Terminal, GitCommit, 
-  Fingerprint, Layers, Cpu, Activity, FileText, XCircle, AlertCircle 
+  Fingerprint, Layers, Cpu, Activity, FileText, XCircle, AlertCircle, Flag, Ban
 } from 'lucide-react';
 import '../styles/GitPulse/GitPulseDashboard.css';
 
 const GitPulseDashboard = ({ data, isModalView, isAuthentic }) => {
+  const [overrideState, setOverrideState] = useState({
+    status: data.humanOverrides?.find((override) => override.action !== 'ignore_source')?.action || null,
+    ignoredSources: new Set(
+      (data.humanOverrides || [])
+        .filter((override) => override.action === 'ignore_source' && override.sourceUrl)
+        .map((override) => override.sourceUrl)
+    ),
+    saving: null,
+    error: null
+  });
+
+  const submitOverride = async (action, sourceUrl = null) => {
+    if (!data.submissionId) return;
+    setOverrideState((current) => ({ ...current, saving: `${action}:${sourceUrl || 'submission'}`, error: null }));
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/submissions/${data.submissionId}/override`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, sourceUrl })
+      });
+      const result = await response.json();
+      if (!result.success) throw new Error(result.message || 'Override failed');
+
+      setOverrideState((current) => {
+        const ignoredSources = new Set(current.ignoredSources);
+        if (action === 'ignore_source' && sourceUrl) ignoredSources.add(sourceUrl);
+        return {
+          ...current,
+          status: action === 'ignore_source' ? current.status : action,
+          ignoredSources,
+          saving: null
+        };
+      });
+    } catch (error) {
+      setOverrideState((current) => ({ ...current, saving: null, error: error.message }));
+    }
+  };
+
+  const visibleMatches = (data.intelligence.globalOriginality?.matches || [])
+    .filter((url) => !overrideState.ignoredSources.has(url));
+
   return (
     <div className={`report-container ${isModalView ? 'modal-view' : ''}`}>
       <div className="dashboard-grid">
@@ -244,13 +286,59 @@ const GitPulseDashboard = ({ data, isModalView, isAuthentic }) => {
                     </div>
                   )}
 
-                  {data.intelligence.globalOriginality?.matches?.length > 0 && (
+                  {data.submissionId && data.intelligence.globalOriginality?.status !== 'Original' && (
+                    <div className="human-review-actions">
+                      <button
+                        type="button"
+                        className="review-action-button confirm"
+                        onClick={() => submitOverride('mark_plagiarism')}
+                        disabled={overrideState.saving !== null}
+                      >
+                        <Flag size={15} />
+                        Mark as plagiarism
+                      </button>
+                      <button
+                        type="button"
+                        className="review-action-button accept"
+                        onClick={() => submitOverride('mark_acceptable')}
+                        disabled={overrideState.saving !== null}
+                      >
+                        <CheckCircle size={15} />
+                        Mark as acceptable
+                      </button>
+                    </div>
+                  )}
+
+                  {overrideState.status && (
+                    <p className="review-state">
+                      Human review: {overrideState.status === 'mark_plagiarism' ? 'plagiarism confirmed' : 'marked acceptable'}
+                    </p>
+                  )}
+
+                  {overrideState.error && (
+                    <p className="review-error">{overrideState.error}</p>
+                  )}
+
+                  {visibleMatches.length > 0 && (
                     <div className="source-matches-wrap">
                       <p className="source-matches-label">Identified Source:</p>
-                      {data.intelligence.globalOriginality.matches.map((url, idx) => (
-                        <a key={idx} href={url} target="_blank" rel="noreferrer" className="source-match-link">
-                          {url}
-                        </a>
+                      {visibleMatches.map((url, idx) => (
+                        <div key={idx} className="source-match-row">
+                          <a href={url} target="_blank" rel="noreferrer" className="source-match-link">
+                            {url}
+                          </a>
+                          {data.submissionId && (
+                            <button
+                              type="button"
+                              className="ignore-source-button"
+                              onClick={() => submitOverride('ignore_source', url)}
+                              disabled={overrideState.saving !== null}
+                              title="Ignore this source"
+                            >
+                              <Ban size={14} />
+                            </button>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
