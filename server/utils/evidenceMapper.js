@@ -184,6 +184,9 @@ function validateSegmentMapping(segment) {
 }
 
 const MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION = 25;
+const MIN_RELATIVE_MATCH = 0.08;   // must be >= 8% of total student FPs
+const MIN_LARGEST_SEGMENT_FPS = 8; // must have at least one coherent block
+
 const env = globalThis.process?.env || {};
 const CALIBRATION = {
     fullCloneContainment: Number(env.GP_FULL_CLONE_CONTAINMENT || 0.8),
@@ -195,10 +198,37 @@ const CALIBRATION = {
 };
 
 /**
- * Multi-dimensional Plagiarism Classification with strict priority ordering.
+ * Source trust weights. These scale final confidence to reduce bad accusations.
+ * Higher = more trustworthy signal. Lower = noisy source.
  */
-function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints, totalMatchedFingerprints) {
+const SOURCE_TRUST_WEIGHTS = {
+    previous_student_submission: 1.0,
+    verified_internal_corpus: 1.0,
+    tutorial_site: 0.8,
+    unknown: 0.7,
+    github_random: 0.6,
+    boilerplate: 0.1
+};
+
+/**
+ * Multi-dimensional Plagiarism Classification with strict priority ordering.
+ * Requires BOTH absolute count AND relative ratio to trigger any flag.
+ * Also requires at least one coherent block of >= 8 fingerprints.
+ */
+function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints, totalMatchedFingerprints, largestSegmentFpCount) {
+    // Gate 1: Absolute minimum count
     if (totalMatchedFingerprints < MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION) {
+        return 'LOW_CONFIDENCE';
+    }
+
+    // Gate 2: Relative minimum ratio (8% of total FPs must match)
+    const relativeRatio = totalFingerprints > 0 ? totalMatchedFingerprints / totalFingerprints : 0;
+    if (relativeRatio < MIN_RELATIVE_MATCH) {
+        return 'LOW_CONFIDENCE';
+    }
+
+    // Gate 3: At least one coherent copied block (not just scattered fragments)
+    if ((largestSegmentFpCount || 0) < MIN_LARGEST_SEGMENT_FPS) {
         return 'LOW_CONFIDENCE';
     }
 
@@ -270,24 +300,19 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         const matchedFingerprintCount = matches.length; 
         const containmentScore = matchedFingerprintCount / totalStudentFingerprints;
 
-        // Apply False Positive Guardrail (Boilerplate)
-        let sourceOrigin = "unknown";
-        if (documentsMetadata[docId]) {
-            sourceOrigin = documentsMetadata[docId].sourceOrigin;
-        }
+        // Apply Source Reputation Weighting + False Positive Guardrail
+        let sourceOrigin = documentsMetadata[docId]?.sourceOrigin || "unknown";
+        const trustWeight = SOURCE_TRUST_WEIGHTS[sourceOrigin] ?? SOURCE_TRUST_WEIGHTS.unknown;
         
-        let effectiveContainment = containmentScore;
-        if (sourceOrigin === 'boilerplate') {
-            // Heavily penalize boilerplate sources so they don't dominate
-            effectiveContainment *= 0.1;
-        }
+        let effectiveContainment = containmentScore * trustWeight;
 
         candidateSources.push({
             docId,
             sourceOrigin,
             containment: effectiveContainment,
             rawContainment: containmentScore, // for true containment metrics
-            segments: scoredSegments
+            segments: scoredSegments,
+            rawSegments: segments // keep raw for coherence gate (fingerprintCount access)
         });
         
         totalRankedContainment += effectiveContainment;
@@ -315,10 +340,20 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         // Plagiarism Classification
         const uniqueSourcesCount = topSources.length;
         let totalSegmentsCount = 0;
-        for (const s of topSources) totalSegmentsCount += s.segments.length;
+        // Track the largest single segment by fingerprint count for the coherence gate
+        let largestSegmentFpCount = 0;
+        for (const s of topSources) {
+            totalSegmentsCount += s.segments.length;
+            for (const seg of s.rawSegments || []) {
+                if ((seg.fingerprintCount || 0) > largestSegmentFpCount) {
+                    largestSegmentFpCount = seg.fingerprintCount;
+                }
+            }
+        }
 
-        // Exclude boilerplate from FULL_CLONE trigger by checking dominant source origin
-        if (dominantSource.sourceOrigin === 'boilerplate') {
+        // Exclude boilerplate-dominant sources from FULL_CLONE
+        const dominantSourceOrigin = topSources[0]?.sourceOrigin || 'unknown';
+        if (dominantSourceOrigin === 'boilerplate') {
             result.plagiarismType = 'BOILERPLATE_HEAVY';
         } else {
             result.plagiarismType = classifyPlagiarism(
@@ -327,7 +362,8 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
                 uniqueSourcesCount, 
                 totalSegmentsCount, 
                 totalStudentFingerprints,
-                result.totalMatchedFingerprints
+                result.totalMatchedFingerprints,
+                largestSegmentFpCount
             );
         }
     }
@@ -343,10 +379,14 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
             avgConfidence = parseFloat((sum / restSegments.length).toFixed(2));
         }
 
+        const trustWeight = SOURCE_TRUST_WEIGHTS[source.sourceOrigin] ?? SOURCE_TRUST_WEIGHTS.unknown;
+
         result.sources.push({
             docId: source.docId,
             sourceUrl: documentsMetadata[source.docId]?.sourceUrl || "unknown",
             fileName: documentsMetadata[source.docId]?.fileName || "unknown",
+            sourceOrigin: source.sourceOrigin,
+            trustWeight,
             containment: Math.round(source.rawContainment * 100),
             topSegments: topSegments,
             otherMatches: {
