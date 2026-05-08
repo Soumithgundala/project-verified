@@ -457,7 +457,7 @@ router.get('/report/:submissionId', async (req, res) => {
 router.post('/submissions/:submissionId/override', async (req, res) => {
     const { submissionId } = req.params;
     const tenantId = resolveTenantId(req);
-    const { action, sourceUrl = null, reason = null } = req.body || {};
+    const { action, sourceUrl = null, reason = null, reviewerId = null } = req.body || {};
     const validActions = new Set(['mark_plagiarism', 'mark_acceptable', 'ignore_source']);
 
     try {
@@ -467,13 +467,16 @@ router.post('/submissions/:submissionId/override', async (req, res) => {
         if (action === 'ignore_source' && !sourceUrl) {
             return res.status(400).json({ success: false, message: 'sourceUrl is required when ignoring a source.' });
         }
+        if (!reason || reason.trim().length === 0) {
+            return res.status(400).json({ success: false, message: 'A reason is required for all overrides. Please explain your decision.' });
+        }
 
         const submission = await getSubmission(submissionId, tenantId);
         if (!submission) {
             return res.status(404).json({ success: false, message: 'Submission not found.' });
         }
 
-        const override = await saveReviewOverride({ submissionId, action, sourceUrl, reason, tenantId });
+        const override = await saveReviewOverride({ submissionId, action, sourceUrl, reason, reviewerId, tenantId });
         res.json({ success: true, override });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
