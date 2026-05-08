@@ -203,7 +203,8 @@ db.exec(`
         submission_id TEXT,
         action TEXT,
         source_url TEXT,
-        reason TEXT,
+        reason TEXT NOT NULL,
+        reviewer_id TEXT,
         tenant_id TEXT DEFAULT '${DEFAULT_TENANT_ID}',
         created_at TEXT,
         updated_at TEXT,
@@ -305,6 +306,7 @@ addColumnIfMissing('quarantine_queue', 'expires_at', 'TEXT');
 addColumnIfMissing('quarantine_code', 'expires_at', 'TEXT');
 addColumnIfMissing('fingerprint_positions', 'start_line', 'INTEGER');
 addColumnIfMissing('fingerprint_positions', 'end_line', 'INTEGER');
+addColumnIfMissing('review_overrides', 'reviewer_id', 'TEXT');
 
 function separateLegacyQuarantineCode() {
     const rows = db.prepare('SELECT id, payload, tenant_id, created_at FROM quarantine_queue').all();
