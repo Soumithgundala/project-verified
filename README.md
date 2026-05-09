@@ -1,119 +1,299 @@
-# GitPulse MVP (Project-Verified)
+# GitPulse — Forensic Code Integrity Engine
 
-Welcome to the **GitPulse MVP (Project-Verified)** repository. This application is a dual-engine forensic analysis tool designed specifically for educators, reviewers, and code auditors to algorithmically and semantically verify code authenticity. 
+GitPulse is a production-grade, multi-tenant plagiarism detection and academic integrity verification platform. It uses **AST-based structural fingerprinting**, **Winnowing**, **IDF-weighted uniqueness scoring**, and **LLM semantic analysis** to detect plagiarism at the project level — not just the file level.
 
-It fuses **WASM Tree-Sitter Mathematics (AST)** with **LLM Semantic Intelligence** to detect high-velocity code dumps, plagiarized tutorials, direct clones, and hallucinated document claims.
+Unlike simple text-diff tools, GitPulse:
+- Is **rename-proof** (ignores variable names, uses grammar structure)
+- Is **reorder-resistant** (detects split and shuffled copies)
+- Provides **line-level evidence** for courtroom-grade reporting
+- Supports **human-in-the-loop override** with immutable audit logging
+- Runs **multi-file cross-project aggregation** to catch subtle evasion
 
 ---
 
-## 🏛 System Architecture
-The application runs on a decoupled React Frontend and an Express/Node.js Algorithmic Backend Engine.
+## System Architecture
 
-```mermaid
-graph TD
-    UI[Frontend: React/Vite] -->|Repo URL / Document Upload| BE[Backend: Express Server]
+```
+┌──────────────────────────────────────────────────────────┐
+│                        FRONTEND (React/Vite)              │
+│  GitPulseDashboard.jsx  ·  ClassroomMatrix.jsx             │
+│  GithubConnect.jsx  ·  GitPulseMVP.jsx                    │
+└──────────────────────────┬───────────────────────────────┘
+                           │ HTTP API
+┌──────────────────────────▼───────────────────────────────┐
+│                   EXPRESS SERVER (server/)                │
+│                                                          │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ ROUTES                                              │ │
+│  │  repoRoutes.js    → GitHub repo analysis pipeline   │ │
+│  │  documentRoutes.js → .docx report verification     │ │
+│  │  adminRoutes.js   → Quarantine & corpus management  │ │
+│  └──────────────┬──────────────────────────────────────┘ │
+│                 │                                         │
+│  ┌──────────────▼──────────────────────────────────────┐ │
+│  │ CORE ENGINE (utils/)                                │ │
+│  │                                                     │ │
+│  │  parserInit.js    → Tree-sitter (AST parser)        │ │
+│  │  astRadar.js      → File scoring + fingerprinting   │ │
+│  │  fingerprintIndex.js → Dual-store DB + IDF lookup   │ │
+│  │  astHashDb.js     → Exact-hash DB + quarantine      │ │
+│  │  evidenceMapper.js → Segment merging + scoring      │ │
+│  │  ai_wrapper.js    → Groq/Gemini/OpenAI cascade      │ │
+│  │  diskCache.js     → Persistent JSON disk cache      │ │
+│  │  ingestionQueue.js → Background job queue           │ │
+│  │  submission.js    → Submission + override CRUD      │ │
+│  │  tenant.js        → Multi-tenant API key resolver   │ │
+│  │  urlUtils.js      → GitHub URL parser               │ │
+│  └──────────────┬──────────────────────────────────────┘ │
+│                 │                                         │
+│  ┌──────────────▼──────────────────────────────────────┐ │
+│  │ DATABASE (db/)    → SQLite via better-sqlite3       │ │
+│  │  database.js      → Schema + migrations             │ │
+│  │  migrate.js       → Manual migration runner         │ │
+│  │  seedWhitelist.js → Boilerplate hash seeder         │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                          │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ JOBS (jobs/)                                        │ │
+│  │  cleanupJob.js    → 6-hour TTL quarantine cleanup   │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                          │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ SCRIPTS (scripts/)                                  │ │
+│  │  seedTutorials.js     → Seeds corpus from GitHub   │ │
+│  │  calibrateEvidence.js → Tunes detection thresholds │ │
+│  └─────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Complete Request Flow
+
+### Flow 1: Repository Integrity Analysis (`POST /api/link-repo`)
+
+```
+Client sends { githubUrl } 
+    → resolveTenantId(req)        [identify which college]
+    → parseGithubUrl(url)         [extract owner/repo]
+    → GitHub API: fetch commits
+    → Run Zhang-Shasha Tree Edit Distance on each commit pair
+    → [CACHE CHECK] DiskCache.get(cacheKey)
     
-    subgraph "Frontend Engine"
-        UI -->|Displays metrics| GP[GitPulse Dashboard]
-        UI -->|Builds Report| PDF[GitPulse PDF Engine]
-        UI -->|Matrix| CM[Classroom Matrix UI]
-    end
-
-    subgraph "Backend Engine"
-        BE --> C1[repoRoutes: Commits / AST Scoring]
-        BE --> C2[documentRoutes: Audit Matrix]
+    IF cache miss or new commits:
+        → extractProjectFingerprints()   [astRadar.js]
+            → Fetch repo file tree from GitHub API
+            → Filter: exclude node_modules, dist, minified files
+            → Download top 10 candidates
+            → Score each file: (AST_nodes × 0.6) + (functions × 0.3) + (unique_tokens × 0.1)
+            → Return top 5 logic-heavy files
         
-        C1 --> U1[astRadar: Fingerprinting & Search]
-        C1 --> U2[ai_wrapper: Waterfall Semantic Summaries]
-        C1 --> U3[astHashDb: Local Clone Caching]
-        C1 --> U4[parserInit: WASM Polyglot Tree-Sitter]
+        → For each file:
+            → parser.parse(rawCode)           [parserInit.js]
+            → generateStructuralHash(rootNode) → SHA-256 exact hash
+            → lookupFingerprints([hash])       [astHashDb.js]
+            → generateWinnowingFingerprints(rootNode, k=15, w=40, fileName)
+                → AST traverse → normalized type sequence
+                → Slide k-gram window → djb2 hash each gram
+                → Winnowing: pick minimum hash per window
+                → Return fingerprints with startLine/endLine/fileName
         
-        C2 --> U1
-        C2 --> U2
-    end
+        → Aggregate all fingerprints across 5 files
+        
+        IF exact hash match found:
+            → globalOriginality = "Exact Clone Detected" (100%)
+        ELSE:
+            → queryDualStore(allFingerprints)  [fingerprintIndex.js]
+                → Lookup Winnowing hashes in fingerprint_index table
+                → Compute IDF uniqueness per hash
+                → Return best matching source + containment score
+            
+            IF containmentScore < 0.3 AND dominance < 0.4:
+                → extractProjectFingerprints(offset=5, limit=5, lightweight=true)
+                → Scan next 5 files (coverage-based expansion)
+                → Re-run dual store query with expanded fingerprints
+            
+            IF winnowing match found:
+                → globalOriginality = "Partial Clone Detected"
+            ELSE:
+                → huntGlobalClones(anchorString) → GitHub Code Search API
+                → Strike 2: AST Showdown (node count comparison)
+                → IF similarity > 90%: queueForCorpusReview()  [astHashDb.js]
+        
+        → generateLLMSummary(fileName, rawCode)  [ai_wrapper.js]
+            → Groq (primary) → Gemini (fallback) → OpenAI (tertiary)
     
-    U1 -->|GitHub API| GITHUB[GitHub Repo/Code Search]
-    U2 -->|LLM Fallback| AI[Groq / Gemini / OpenAI]
+    → saveSubmission({ fingerprints, results, tenantId })  [submission.js]
+    → DiskCache.set(cacheKey, result)
+    → res.json({ submissionId, ...finalPayload })
+```
+
+### Flow 2: Evidence Report (`GET /api/report/:submissionId`)
+
+```
+Client requests report for submissionId
+    → getSubmission(submissionId)          [submission.js]
+    → getDetailedMatches(studentFPs)       [fingerprintIndex.js]
+        → Query fingerprint_positions table for each hash
+        → Compute IDF uniqueness per hash (log(totalDocs / docFreq))
+        → Return matchesByDoc with full position data
+    → getDocumentsMetadata(docIds)
+        → Fetch sourceUrl, fileName, sourceOrigin per docId
+    → buildProjectReport(fps, matchesByDoc, meta)  [evidenceMapper.js]
+        → mergeSegments() per source, per file
+        → filterNoise() (min 3 FPs, min 30 bytes)
+        → computeConfidence() → density + length + uniqueness + coherence
+        → calibrateConfidence() → human label
+        → Source reputation weighting (trustWeight)
+        → Dominance scoring
+        → Triple-gate classification (absolute + relative + coherence)
+    → listReviewOverrides(submissionId)    [submission.js]
+    → Apply ignored sources filter
+    → Apply human override to plagiarismType
+    → res.json({ evidenceReport, humanOverrides })
+```
+
+### Flow 3: Human Override (`POST /api/submissions/:id/override`)
+
+```
+Professor clicks "Mark as plagiarism" + enters reason
+    → Validate action ∈ { mark_plagiarism, mark_acceptable, ignore_source }
+    → Validate reason is not empty (REQUIRED for audit)
+    → getSubmission() — confirm submission exists
+    → saveReviewOverride({ action, reason, reviewerId, tenantId })
+        → Append-only INSERT to review_overrides
+        → Never overwrites existing decisions
+    → res.json({ override })
+```
+
+### Flow 4: Document Audit (`POST /api/audit-document`)
+
+```
+Professor uploads .docx + provides GitHub URL
+    → multer: validate MIME type + size limit
+    → mammoth.extractRawText() → strip formatting, get plain text
+    → Fuzzy Window Slicer: find "Technologies Used" section ±6KB
+    → normalizeTechClaims(textSlice) [ai_wrapper.js]
+        → LLM extracts package names → ['react', 'node', 'flask']
+    → verifyTechStack(owner, repo, sha, claims) [astRadar.js]
+        → For each claimed library: check if imported anywhere in repo
+        → Returns matrix: [{ name, status: 'Verified' | 'Missing' | 'Suspicious' }]
+    → alignmentScore = verified / total × 100
+    → res.json({ alignmentScore, matrix })
+```
+
+### Flow 5: Admin Corpus Promotion (`POST /api/admin/quarantine/:id/promote`)
+
+```
+Admin reviews quarantined clone
+    → getQuarantineItem(id) → fetch raw code + metadata
+    → parser.parse(rawCode) → validate syntax
+    → generateWinnowingFingerprints(rootNode)
+    → enqueueIngestion(async () => {
+          saveToDualStore(fingerprints, sourceUrl, fileName, {
+              sourceType: 'trusted_corpus',
+              verificationStatus: 'verified'
+          })
+          removeFromQuarantine(id)
+      })
+    → res.json({ jobId })
 ```
 
 ---
 
-## 💻 Frontend: Code Visualization
+## Project Setup
 
-The client is built on **React 19, Vite, Recharts, and Tailwind CSS**. It acts as the visual translation layer for complex algorithms.
+### Prerequisites
+- Node.js 18+
+- A GitHub Personal Access Token
+- (Optional) Groq, Gemini, or OpenAI API keys
 
-### 1. `GitPulseDashboard.jsx` (The Core UI)
-- **Functionality**: The central nervous system of the client. It handles the main search input, kicks off the backend API calls (`/api/link-repo`), and orchestrates the rendering of incoming data.
-- **Visuals**: Plots structural Edit Distances on an area chart (`Evolution Pulse`), groups commits into standard vs. suspicious categories (`Semantic Clusters`), and renders the `LLM Intelligence` readout.
+### Installation
 
-### 2. `GitPulsePdfReport.jsx` (The Exporter)
-- **Functionality**: Acts as a forensic immutable record generator. 
-- **Under the Hood**: Uses `html2pdf.js` to invisibly render a perfectly styled duplicate of the dashboard data (including the Document Alignment Matrix) into a hidden DOM element, snapshots it, and triggers a raw PDF download. 
-
-### 3. `ClassroomMatrix.jsx` (The Auditor UI)
-- **Functionality**: A specific user interface that allows an auditor to upload a student's technical report (`.docx`), pinging the backend's `/api/audit-document` route. It displays a side-by-side verification table that proves or disproves if technologies claimed in writing actually exist in the compiled repository.
-
----
-
-## ⚙️ Backend: Algorithmic Core
-
-The backend is built in **Express & Node.js**, serving as the heavy-lifting computational core. It intercepts requests and triggers independent intelligence modules. 
-
-### Core Routing logic
-#### `/api/link-repo` (`server/routes/repoRoutes.js`)
-- Iterates through the top 30 commits of a repo.
-- For each commit, it downloads the GitHub diff, splits the hunk into `oldCode` and `newCode`, and feeds them to WASM **Tree-Sitter**.
-- **Zhang-Shasha Distance Proxy**: Calculates exactly how many semantic AST nodes were added/removed between the old and new tree. 
-- Math converts this into an **Integrity Score**. A low score means humanly-impossible mass code injection. 
-- It then queues the Originality module (`huntGlobalClones`) and the LLM module (`generateLLMSummary`).
-
-#### `/api/audit-document` (`server/routes/documentRoutes.js`)
-- Takes an uploaded `.docx` file using `multer` and extracts raw strings using `mammoth.js`.
-- Uses regular expressions to fuzzily slice a window around "Technologies Used" or "Tech Stack" headers.
-- Feeds the slice to the LLM to yield normalized JSON arrays of claims. 
-- Kicks the array into `astRadar.js` to mathematically prove authenticity. 
-
-### Utility Tooling
-
-#### `astRadar.js` (The Global Intelligence Tool)
-- `extractProjectFingerprint()`: The core heuristic. Recursively scans the GitHub tree. Aggressively blacklists minified builds, `node_modules`, and bundles >150KB. It parses the top 5 largest remaining files via Regex Cyclomatic Complexity to find the "heaviest logic file". It grabs a 50-character string from the center of this file.
-- `huntGlobalClones()`: Submits the 50-char Anchor String to global GitHub Code Search. If matches are found, it detects tutorial boilerplate or massive outright clones. 
-- `generateStructuralHash()`: Strips all variable names and strings from a Tree-Sitter AST map, creating a rename-proof, syntax-only hash for clone caching. 
-- `verifyTechStack()`: Cleanses and strips hyphens/spaces to super-normalize `package.json` strings and LLM claims. Fuzzy-matches claims to ensure a student isn't lying on their report. 
-
-#### `ai_wrapper.js` (The Semantic LLM Bridge)
-- `analyzeRepositoryAST()`: Bridges the pure maths of the WASM algorithms with readable semantic summaries. Implements the **LLM Waterfall**:
-  1. **Groq (Primary)**: Uses `llama-3.1-8b-instant` for ultra-fast, cheap processing.
-  2. **Google GenAI (Secondary)**: Fails over to `gemini-1.5-flash-preview` on rate-limits.
-  3. **OpenAI (Fallback)**: Drops to `gpt-4o-mini` if all else fails.
-
-#### `astHashDb.js` 
-- A fully synchronous zero-cost local database mechanism. Caches a `generateStructuralHash` to `db.json` when a known-clone is found on GitHub. On subsequent scans of other students, if the AST hash matches, it flags them at **Strike 1** without making a single external API request.
-
-#### `parserInit.js`
-- Spawns the WebAssembly polyglot Tree-Sitter bindings, mapping extensions (e.g., `.jsx`) directly to compiled `tree-sitter-javascript.wasm` binaries at server boot.
-
----
-
-## 🚀 Getting Started
-
-To run the application locally, you need to spin up both engines. 
-
-> [!IMPORTANT]
-> Ensure you have an `.env` file loaded into your `server` directory with `GITHUB_TOKEN`, `GROQ_API_KEY`, `GEMINI_API_KEY`, and `OPENAI_API_KEY` defined. 
-
-**Terminal 1: The Backend Engine**
 ```bash
-cd server
+# Install frontend dependencies
 npm install
-npm run dev
-# Running on http://localhost:5000
+
+# Install server dependencies
+cd server && npm install && cd ..
+
+# Copy environment template
+cp server/.env.example server/.env
+# Fill in GITHUB_TOKEN, GROQ_API_KEY, etc.
 ```
 
-**Terminal 2: The Frontend UI**
+### Environment Variables (`server/.env`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_TOKEN` | Yes | GitHub PAT for API calls |
+| `GROQ_API_KEY` | Yes | Primary LLM provider |
+| `GEMINI_API_KEY` | No | Fallback LLM |
+| `OPENAI_API_KEY` | No | Tertiary LLM fallback |
+| `DEFAULT_TENANT_ID` | No | Default tenant (default: `'default'`) |
+| `SQLITE_DB_PATH` | No | Custom DB path relative to server/ |
+| `GP_FULL_CLONE_CONTAINMENT` | No | Classification threshold (default: `0.8`) |
+| `GP_FULL_CLONE_DOMINANCE` | No | Dominance threshold (default: `0.7`) |
+| `GP_MOSAIC_MIN_SOURCES` | No | Min sources for MOSAIC (default: `3`) |
+| `GP_PARTIAL_CLONE_CONTAINMENT` | No | Partial clone threshold (default: `0.4`) |
+
+### Running
+
 ```bash
-# In the root repository directory
-npm install
+# Start frontend dev server
 npm run dev
-# Running on http://localhost:5173
+
+# Start backend (from /server)
+cd server && node index.js
+
+# Seed the reference corpus (run once)
+cd server && node scripts/seedTutorials.js
+
+# Run calibration to validate thresholds
+npm run calibrate:evidence
 ```
+
+---
+
+## Multi-Tenant Architecture
+
+Every database row is partitioned by `tenant_id`. API keys in the `Authorization: Bearer <key>` header resolve to a tenant:
+
+```
+Bearer abc123 → college_A
+Bearer xyz789 → college_B
+(no key)      → default
+```
+
+This means different institutions share the same server but never see each other's data.
+
+---
+
+## Classification Labels
+
+| Label | Meaning |
+|---|---|
+| `FULL_CLONE` | >80% containment, >70% from one source |
+| `MOSAIC` | Stitched from 3+ sources, 8+ segments, ratio > 20% |
+| `PARTIAL_CLONE` | >40% containment but lower dominance |
+| `LOW_CONFIDENCE` | Fewer than 25 matches, <8% relative, no coherent block |
+| `BOILERPLATE_HEAVY` | Primary source is known boilerplate (React template, etc.) |
+| `HUMAN_CONFIRMED_PLAGIARISM` | Professor manually confirmed |
+| `HUMAN_MARKED_ACCEPTABLE` | Professor cleared it (with reason on record) |
+
+---
+
+## Directories
+
+| Path | Purpose |
+|---|---|
+| `server/` | Node.js/Express forensic backend |
+| `server/db/` | SQLite schema, migrations, seeding |
+| `server/routes/` | HTTP API endpoint handlers |
+| `server/utils/` | Core forensic engine modules |
+| `server/jobs/` | Background scheduled tasks |
+| `server/scripts/` | Admin CLI tools |
+| `src/` | React frontend |
+| `src/components/` | React UI components |
+
+> See the README.md inside each directory for detailed function-level documentation.
