@@ -8,6 +8,8 @@ import GitPulseDashboard from './GitPulse/GitPulseDashboard';
 import GitPulsePdfReport from './GitPulse/GitPulsePdfReport';
 import GitPulseHelpModal from './GitPulse/GitPulseHelpModal';
 
+const inFlightAnalyses = new Map();
+
 // NEW: Added initialData and isModalView props
 const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, isModalView = false }) => {
   const [loading, setLoading] = useState(!initialData);
@@ -15,6 +17,7 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
   const [isPrinting, setIsPrinting] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const reportRef = useRef();
+  const activeRequestKey = useRef(null);
 
   useEffect(() => {
     // If initialData was passed from the Cohort Matrix, skip the fetch!
@@ -24,26 +27,38 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
       return;
     }
 
+    const requestKey = `${linkedUrl || ''}:${auditDocument?.name || ''}:${auditDocument?.size || 0}`;
+    if (activeRequestKey.current === requestKey) return;
+    activeRequestKey.current = requestKey;
+
     const analyzeRepo = async () => {
       try {
-        const repoFetch = fetch('http://localhost:5000/api/link-repo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: linkedUrl }),
-        }).then(r => r.json());
+        if (!inFlightAnalyses.has(requestKey)) {
+          inFlightAnalyses.set(requestKey, (async () => {
+            const repoFetch = fetch('http://localhost:5000/api/link-repo', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: linkedUrl }),
+            }).then(r => r.json());
 
-        let auditFetch = Promise.resolve({});
-        if (auditDocument) {
-          const formData = new FormData();
-          formData.append('githubUrl', linkedUrl);
-          formData.append('document', auditDocument);
-          auditFetch = fetch('http://localhost:5000/api/audit-document', {
-            method: 'POST',
-            body: formData,
-          }).then(r => r.json());
+            let auditFetch = Promise.resolve({});
+            if (auditDocument) {
+              const formData = new FormData();
+              formData.append('githubUrl', linkedUrl);
+              formData.append('document', auditDocument);
+              auditFetch = fetch('http://localhost:5000/api/audit-document', {
+                method: 'POST',
+                body: formData,
+              }).then(r => r.json());
+            }
+
+            return Promise.all([repoFetch, auditFetch]);
+          })().finally(() => {
+            inFlightAnalyses.delete(requestKey);
+          }));
         }
 
-        const [repoResult, auditResult] = await Promise.all([repoFetch, auditFetch]);
+        const [repoResult, auditResult] = await inFlightAnalyses.get(requestKey);
 
         if (repoResult.success) {
           setData({ ...repoResult, ...auditResult });
@@ -54,6 +69,7 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
         console.error("Analysis failed:", err);
       } finally {
         setLoading(false);
+        activeRequestKey.current = null;
       }
     };
     if (linkedUrl && !initialData) analyzeRepo();
@@ -106,7 +122,7 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
         <div ref={reportRef}>
           {/* LAYOUT 1: THE WEB DASHBOARD */}
           <div style={{ display: isPrinting ? 'none' : 'block' }}>
-            <GitPulseDashboard data={data} isModalView={isModalView} isAuthentic={isAuthentic} />
+            <GitPulseDashboard data={data} setData={setData} isModalView={isModalView} isAuthentic={isAuthentic} />
           </div>
 
           {/* LAYOUT 2: THE FORENSIC PDF TEMPLATE */}
