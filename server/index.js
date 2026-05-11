@@ -11,9 +11,29 @@ import adminRoutes from './routes/adminRoutes.js';
 import { getQueueStatus } from './utils/ingestionQueue.js';
 import { resolveTenantId } from './utils/tenant.js';
 import { startCleanupJob } from './jobs/cleanupJob.js';
+import { createCorrelationId, logger } from './utils/logger.js';
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  const correlationId = req.get('x-correlation-id') || createCorrelationId();
+  req.correlationId = correlationId;
+  res.set('x-correlation-id', correlationId);
+
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    logger.info('http_request', {
+      correlationId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: Date.now() - startedAt,
+      tenantId: resolveTenantId(req)
+    });
+  });
+
+  next();
+});
 
 // Routes
 app.use('/api', repoRoutes);
