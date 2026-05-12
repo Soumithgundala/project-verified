@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import '../styles/GitPulse/GitPulseDashboard.css';
 
-const GitPulseDashboard = ({ data, isModalView, isAuthentic }) => {
+const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
   const [overrideState, setOverrideState] = useState({
     status: data.humanOverrides?.find((override) => override.action !== 'ignore_source')?.action || null,
     ignoredSources: new Set(
@@ -22,13 +22,16 @@ const GitPulseDashboard = ({ data, isModalView, isAuthentic }) => {
 
   const submitOverride = async (action, sourceUrl = null) => {
     if (!data.submissionId) return;
+    const reason = window.prompt('Enter the reviewer reason for the audit trail:');
+    if (!reason || reason.trim().length === 0) return;
+
     setOverrideState((current) => ({ ...current, saving: `${action}:${sourceUrl || 'submission'}`, error: null }));
 
     try {
       const response = await fetch(`http://localhost:5000/api/submissions/${data.submissionId}/override`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, sourceUrl })
+        body: JSON.stringify({ action, sourceUrl, reason })
       });
       const result = await response.json();
       if (!result.success) throw new Error(result.message || 'Override failed');
@@ -43,6 +46,26 @@ const GitPulseDashboard = ({ data, isModalView, isAuthentic }) => {
           saving: null
         };
       });
+      if (setData) {
+        setData((current) => ({
+          ...current,
+          humanOverrides: [...(current.humanOverrides || []), result.override],
+          evidenceReport: current.evidenceReport
+            ? {
+                ...current.evidenceReport,
+                humanOverride: action === 'ignore_source' ? current.evidenceReport.humanOverride : result.override,
+                plagiarismType: action === 'mark_plagiarism'
+                  ? 'HUMAN_CONFIRMED_PLAGIARISM'
+                  : action === 'mark_acceptable'
+                    ? 'HUMAN_MARKED_ACCEPTABLE'
+                    : current.evidenceReport.plagiarismType,
+                sources: action === 'ignore_source' && sourceUrl
+                  ? current.evidenceReport.sources.filter((source) => source.sourceUrl !== sourceUrl)
+                  : current.evidenceReport.sources
+              }
+            : current.evidenceReport
+        }));
+      }
     } catch (error) {
       setOverrideState((current) => ({ ...current, saving: null, error: error.message }));
     }
