@@ -284,6 +284,8 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
                 studentFileName: seg.studentFileName,
                 student: { startLine: seg.studentStartLine || 1, endLine: seg.studentEndLine || 1 },
                 source: { startLine: seg.sourceStartLine || 1, endLine: seg.sourceEndLine || 1 },
+                fingerprintCount: seg.fingerprintCount,
+                hashIds: [...new Set((seg.matches || []).map(match => match.hash))].slice(0, 12),
                 mappingValidation: validateSegmentMapping(seg),
                 confidence: {
                     score: parseFloat(confidenceCalc.score.toFixed(2)),

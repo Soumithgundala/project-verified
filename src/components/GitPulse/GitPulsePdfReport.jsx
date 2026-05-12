@@ -3,6 +3,34 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } fro
 import '../styles/GitPulse/GitPulsePdfReport.css';
 
 const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
+  const evidenceReport = data.evidenceReport;
+  const humanOverrides = data.humanOverrides || [];
+  const parserDiagnostics = data.analysis?.parserDiagnostics;
+  const hasParseFailure = parserDiagnostics?.status === 'severe_parse_failure' ||
+    data.analysis?.cst?.includes('(ERROR)') ||
+    data.intelligence?.globalOriginality?.status?.includes('Parsing Failure');
+  const hasFallbackFailure = (data.matrix || []).some(row =>
+    row.status.includes('Parsing Failure') || row.status.includes('Fallback Failure')
+  );
+
+  const buildClassificationExplanation = () => {
+    if (!evidenceReport) return null;
+    const dominant = evidenceReport.sources?.[0];
+    const largestSegment = dominant?.topSegments?.reduce((max, segment) => {
+      const count = segment.fingerprintCount || 0;
+      return count > (max.fingerprintCount || 0) ? segment : max;
+    }, {}) || {};
+
+    if (evidenceReport.plagiarismType === 'BOILERPLATE_HEAVY') {
+      return 'Low-trust boilerplate matches were suppressed from primary classification.';
+    }
+
+    const largestSegmentText = largestSegment.fingerprintCount
+      ? `Largest coherent segment contains ${largestSegment.fingerprintCount} fingerprints.`
+      : 'No coherent segment exceeded the receipt display threshold.';
+    return `Project containment reached ${evidenceReport.projectContainment}%. Dominant source contributed ${evidenceReport.dominanceScore}% of ranked evidence. ${largestSegmentText}`;
+  };
+
   return (
     <div className={`pdf-container ${isPrinting ? 'is-printing' : ''}`}>
       <div className="pdf-header">
@@ -34,6 +62,21 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
           <p className="pdf-stat-value pdf-stat-primary">{data.analysis.editDistance}</p>
         </div>
       </div>
+
+      {(hasParseFailure || hasFallbackFailure) && (
+        <div className="pdf-diagnostic-note">
+          <h3>Analysis Diagnostics</h3>
+          {hasParseFailure && (
+            <p>
+              Parser degradation detected. The report may show zero or reduced structural evidence because one or more commits/files exceeded parser health limits.
+              {parserDiagnostics ? ` Latest parser status: ${parserDiagnostics.status}; old error ratio ${parserDiagnostics.oldErrorRatio}; new error ratio ${parserDiagnostics.newErrorRatio}.` : ''}
+            </p>
+          )}
+          {hasFallbackFailure && (
+            <p>Deep fallback verification reported a parsing or fallback failure. Missing receipts should not be interpreted as confirmed originality.</p>
+          )}
+        </div>
+      )}
 
       {data.intelligence && (
         <div className="pdf-section no-break">
@@ -70,6 +113,110 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {evidenceReport && (
+        <div className="pdf-section no-break">
+          <h3 className="pdf-section-title">Forensic Evidence Receipts</h3>
+          <div className="pdf-evidence-summary">
+            <div>
+              <p className="pdf-stat-label">Classification</p>
+              <p className="pdf-evidence-classification">{evidenceReport.plagiarismType}</p>
+            </div>
+            <div>
+              <p className="pdf-stat-label">Containment</p>
+              <p className="pdf-evidence-metric">{evidenceReport.projectContainment}%</p>
+            </div>
+            <div>
+              <p className="pdf-stat-label">Dominance</p>
+              <p className="pdf-evidence-metric">{evidenceReport.dominanceScore}%</p>
+            </div>
+          </div>
+          <p className="pdf-evidence-explanation">{buildClassificationExplanation()}</p>
+
+          {evidenceReport.sources?.length > 0 ? (
+            evidenceReport.sources.map((source, sourceIndex) => (
+              <div key={source.docId || sourceIndex} className="pdf-receipt-box">
+                <div className="pdf-receipt-header">
+                  <div>
+                    <p className="pdf-receipt-label">Source URL</p>
+                    <p className="pdf-receipt-url">{source.sourceUrl}</p>
+                  </div>
+                  <div className="pdf-receipt-score">
+                    <span>{source.containment}%</span>
+                    <small>containment</small>
+                  </div>
+                </div>
+                <div className="pdf-receipt-meta">
+                  <span>Origin: {source.sourceOrigin}</span>
+                  <span>Trust weight: {source.trustWeight}</span>
+                  <span>File: {source.fileName}</span>
+                </div>
+                {source.sourceOrigin === 'boilerplate' && (
+                  <p className="pdf-boilerplate-note">Low-trust boilerplate match suppressed from primary classification.</p>
+                )}
+                <table className="pdf-receipt-table">
+                  <thead>
+                    <tr>
+                      <th>Student Lines</th>
+                      <th>Source Lines</th>
+                      <th>Fingerprints</th>
+                      <th>Confidence</th>
+                      <th>Breakdown</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(source.topSegments || []).map((segment, index) => (
+                      <tr key={index}>
+                        <td>{segment.student?.startLine}-{segment.student?.endLine}</td>
+                        <td>{segment.source?.startLine}-{segment.source?.endLine}</td>
+                        <td>{segment.fingerprintCount || segment.hashIds?.length || 'n/a'}</td>
+                        <td>{Math.round((segment.confidence?.score || 0) * 100)}% {segment.confidence?.label}</td>
+                        <td>
+                          D {segment.confidence?.breakdown?.density ?? 0},
+                          L {segment.confidence?.breakdown?.length ?? 0},
+                          U {segment.confidence?.breakdown?.uniqueness ?? 0},
+                          C {segment.confidence?.breakdown?.coherence ?? 0}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
+          ) : (
+            <p className="pdf-evidence-empty">
+              No qualifying evidence receipts passed the confidence threshold.
+              {(hasParseFailure || hasFallbackFailure) ? ' Analysis diagnostics above indicate this may be due to parser or fallback degradation.' : ''}
+            </p>
+          )}
+        </div>
+      )}
+
+      {humanOverrides.length > 0 && (
+        <div className="pdf-section no-break">
+          <h3 className="pdf-section-title">Reviewer Audit Trail</h3>
+          <table className="pdf-receipt-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Reviewed By</th>
+                <th>Decision</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {humanOverrides.map((override) => (
+                <tr key={override.overrideId}>
+                  <td>{new Date(override.createdAt).toLocaleString()}</td>
+                  <td>{override.reviewerId || 'Unspecified reviewer'}</td>
+                  <td>{override.action}</td>
+                  <td>{override.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -239,7 +386,7 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
             <tbody>
               {data.matrix.map((row, idx) => {
                 const isVerified = row.status.startsWith('Verified');
-                const isFailure = row.status.includes('Parsing Failure');
+                const isFailure = row.status.includes('Parsing Failure') || row.status.includes('Fallback Failure');
                 
                 return (
                   <tr key={idx} className={isVerified ? 'pdf-align-row-verified' : (isFailure ? 'pdf-align-row-warning' : 'pdf-align-row-unverified')}>

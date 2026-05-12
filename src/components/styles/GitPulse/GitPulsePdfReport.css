@@ -211,6 +211,137 @@
   white-space: pre-wrap;
 }
 
+.pdf-diagnostic-note {
+  margin-bottom: 22px;
+  padding: 12px 14px;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #78350f;
+}
+.pdf-diagnostic-note h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.pdf-diagnostic-note p {
+  margin: 4px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pdf-evidence-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.pdf-evidence-summary > div {
+  padding: 12px;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+}
+.pdf-evidence-summary > div:last-child { border-right: 0; }
+.pdf-evidence-classification,
+.pdf-evidence-metric {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.pdf-evidence-explanation,
+.pdf-evidence-empty,
+.pdf-boilerplate-note {
+  margin: 8px 0 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #475569;
+}
+.pdf-boilerplate-note {
+  padding: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  color: #92400e;
+}
+.pdf-receipt-box {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 10px;
+  background: #ffffff;
+}
+.pdf-receipt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.pdf-receipt-label {
+  margin: 0 0 4px;
+  font-size: 9px;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: #64748b;
+}
+.pdf-receipt-url {
+  margin: 0;
+  font-size: 10px;
+  font-family: "Courier New", monospace;
+  color: #1d4ed8;
+  overflow-wrap: anywhere;
+}
+.pdf-receipt-score {
+  min-width: 80px;
+  text-align: right;
+}
+.pdf-receipt-score span {
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.pdf-receipt-score small {
+  display: block;
+  font-size: 9px;
+  color: #64748b;
+}
+.pdf-receipt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.pdf-receipt-meta span {
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 9px;
+  font-weight: 700;
+}
+.pdf-receipt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+}
+.pdf-receipt-table th {
+  background: #f1f5f9;
+  color: #475569;
+  text-align: left;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+}
+.pdf-receipt-table td {
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  vertical-align: top;
+}
+
 /* Graph */
 .pdf-chart-container {
   height: 250px;
