@@ -1,7 +1,7 @@
 import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
-import { extractProjectFingerprints, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints } from '../utils/astRadar.js';
+import { extractProjectFingerprints, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints, getAstParserHealth } from '../utils/astRadar.js';
 import { lookupFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
 import { queryDualStore, getDetailedMatches, getDocumentsMetadata } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
@@ -10,6 +10,7 @@ import { parseGithubUrl } from '../utils/urlUtils.js';
 import { resolveTenantId } from '../utils/tenant.js';
 import { buildProjectReport } from '../utils/evidenceMapper.js';
 import { saveSubmission, getSubmission, saveReviewOverride, listReviewOverrides } from '../utils/submission.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -23,9 +24,9 @@ const headers = env.GITHUB_TOKEN
 export { parseGithubUrl };
 
 const MODULE_VERSIONS = {
-  commits:     1, 
+  commits:     2,
   llmSummary:  1,
-  originality: 4,
+  originality: 5,
 };
 
 function extractWinnowingForFiles(fingerprints) {
@@ -43,13 +44,23 @@ function extractWinnowingForFiles(fingerprints) {
       if (grammars[langKey]) {
         parser.setLanguage(grammars[langKey]);
         studentTree = parser.parse(fp.rawCode);
+        const parserHealth = getAstParserHealth(studentTree.rootNode);
 
-        if (studentTree.rootNode.hasError) {
-          console.warn(`[!] Parser choked on ${fp.fileName} (hasError).`);
+        if (parserHealth.isSeverelyCorrupt) {
+          logger.warn('ast_parser_severe_corruption', {
+            fileName: fp.fileName,
+            errorNodes: parserHealth.errorNodes,
+            totalNodes: parserHealth.totalNodes,
+            errorRatio: Number(parserHealth.errorRatio.toFixed(4))
+          });
           hasParsingFailure = true;
         } else {
           studentHash = generateStructuralHash(studentTree.rootNode);
-          console.log(`[Strike 1] Student AST hash for ${fp.fileName}: ${studentHash.substring(0, 12)}...`);
+          logger.info('student_ast_hash', {
+            fileName: fp.fileName,
+            hashPrefix: studentHash.substring(0, 12),
+            parserErrorRatio: Number(parserHealth.errorRatio.toFixed(4))
+          });
 
           const fps = generateWinnowingFingerprints(studentTree.rootNode, 15, 40, fp.fileName);
           studentWinnowingFps.push(...fps);
@@ -66,6 +77,8 @@ function extractWinnowingForFiles(fingerprints) {
 router.post('/link-repo', async (req, res) => {
   const url = req.body.url || req.body.repoUrl;
   const tenantId = resolveTenantId(req);
+  const correlationId = req.correlationId;
+  const startedAt = Date.now();
 
   if (!url) {
     return res.status(400).json({ success: false, message: 'Repository URL is required.' });
@@ -74,6 +87,7 @@ router.post('/link-repo', async (req, res) => {
   try {
     const { owner, repo } = parseGithubUrl(url);
     const cacheKey = `${tenantId}:${owner}/${repo}`;
+    logger.info('plagiarism_scan_started', { correlationId, tenantId, repo: `${owner}/${repo}` });
 
     // ── Lightweight call: just enough to detect new commits ───────────────
     const commitsResponse = await axios.get(
@@ -122,6 +136,14 @@ router.post('/link-repo', async (req, res) => {
           );
           const rawHunk = sourceFile?.patch || "";
           let n1 = 0, n2 = 0, d = 0, r = 1, cstStr = "No code patch found.";
+          let parserDiagnostics = {
+            status: rawHunk && sourceFile ? 'not_parsed' : 'no_code_patch',
+            fileName: sourceFile?.filename || null,
+            oldErrorRatio: 0,
+            newErrorRatio: 0,
+            oldErrorNodes: 0,
+            newErrorNodes: 0
+          };
 
           if (parser && rawHunk && sourceFile) {
             const fileExt     = validExtensions.find(ext => sourceFile.filename.endsWith(ext));
@@ -131,24 +153,56 @@ router.post('/link-repo', async (req, res) => {
               const { oldCode, newCode } = splitDiff(rawHunk);
               const treeOld = parser.parse(oldCode);
               const treeNew = parser.parse(newCode);
-              
-              if (treeOld.rootNode.hasError || treeNew.rootNode.hasError) {
-                  console.warn(`[!] AST Parser flagged (ERROR) nodes in commit ${c.sha}. Aborting struct measurement.`);
-                  d = 0; // Abort edit distance measurement
-                  cstStr = "(ERROR) Minified or Invalid Syntax Detected";
+
+              const oldHealth = getAstParserHealth(treeOld.rootNode);
+              const newHealth = getAstParserHealth(treeNew.rootNode);
+              n1 = treeOld.rootNode.descendantCount;
+              n2 = treeNew.rootNode.descendantCount;
+              d  = Math.abs(n2 - n1);
+              parserDiagnostics = {
+                status: 'clean',
+                fileName: sourceFile.filename,
+                oldErrorRatio: Number(oldHealth.errorRatio.toFixed(4)),
+                newErrorRatio: Number(newHealth.errorRatio.toFixed(4)),
+                oldErrorNodes: oldHealth.errorNodes,
+                newErrorNodes: newHealth.errorNodes
+              };
+
+              if (oldHealth.isSeverelyCorrupt || newHealth.isSeverelyCorrupt) {
+                  logger.warn('ast_parser_measurement_aborted', {
+                    correlationId,
+                    tenantId,
+                    commitSha: c.sha,
+                    fileName: sourceFile.filename,
+                    oldErrorRatio: Number(oldHealth.errorRatio.toFixed(4)),
+                    newErrorRatio: Number(newHealth.errorRatio.toFixed(4)),
+                    oldErrorNodes: oldHealth.errorNodes,
+                    newErrorNodes: newHealth.errorNodes
+                  });
+                  r = 0;
+                  parserDiagnostics.status = 'severe_parse_failure';
+                  cstStr = `(ERROR) Severe parser corruption detected. Old error ratio: ${parserDiagnostics.oldErrorRatio}; New error ratio: ${parserDiagnostics.newErrorRatio}. Structural score downgraded instead of silently reporting zero evidence.`;
               } else {
-                  n1 = treeOld.rootNode.descendantCount;
-                  n2 = treeNew.rootNode.descendantCount;
-                  d  = Math.abs(n2 - n1);
                   r  = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
                   cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+                  if (oldHealth.hasErrors || newHealth.hasErrors) {
+                    parserDiagnostics.status = 'partial_parse_used';
+                    logger.warn('ast_parser_partial_parse_used', {
+                      correlationId,
+                      tenantId,
+                      commitSha: c.sha,
+                      fileName: sourceFile.filename,
+                      oldErrorRatio: Number(oldHealth.errorRatio.toFixed(4)),
+                      newErrorRatio: Number(newHealth.errorRatio.toFixed(4))
+                    });
+                  }
               }
             }
           }
           return {
             sha: c.sha.substring(0, 7), score: parseFloat(r.toFixed(2)),
             date: c.commit.author.date,  message: c.commit.message,
-            author: c.commit.author.name, details: { n1, n2, d, cstStr }
+            author: c.commit.author.name, details: { n1, n2, d, cstStr, parserDiagnostics }
           };
         } catch { return null; }
       }));
@@ -217,9 +271,17 @@ router.post('/link-repo', async (req, res) => {
               if (grammars[langKey]) {
                 parser.setLanguage(grammars[langKey]);
                 studentTree = parser.parse(fp.rawCode);
+                const parserHealth = getAstParserHealth(studentTree.rootNode);
                 
-                if (studentTree.rootNode.hasError) {
-                    console.warn(`[!] Parser choked on ${fp.fileName} (hasError).`);
+                if (parserHealth.isSeverelyCorrupt) {
+                    logger.warn('ast_parser_severe_corruption', {
+                      correlationId,
+                      tenantId,
+                      fileName: fp.fileName,
+                      errorNodes: parserHealth.errorNodes,
+                      totalNodes: parserHealth.totalNodes,
+                      errorRatio: Number(parserHealth.errorRatio.toFixed(4))
+                    });
                     hasParsingFailure = true;
                 } else {
                     studentHash = generateStructuralHash(studentTree.rootNode);
@@ -377,7 +439,8 @@ router.post('/link-repo', async (req, res) => {
         editDistance: latest.details.d,
         rewardScore:  latest.score,
         status: latest.score < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
-        cst: latest.details.cstStr
+        cst: latest.details.cstStr,
+        parserDiagnostics: latest.details.parserDiagnostics || null
       }
     };
 
@@ -395,9 +458,29 @@ router.post('/link-repo', async (req, res) => {
         tenantId
     });
 
-    res.json({ success: true, submissionId, ...finalPayload });
+    const matchesByDoc = await getDetailedMatches(studentWinnowingFps, { tenantId });
+    const docIds = Object.keys(matchesByDoc);
+    const meta = await getDocumentsMetadata(docIds, tenantId);
+    const evidenceReport = buildProjectReport(studentWinnowingFps, matchesByDoc, meta);
+
+    logger.info('plagiarism_scan_completed', {
+      correlationId,
+      tenantId,
+      submissionId,
+      repo: `${owner}/${repo}`,
+      containment: evidenceReport.projectContainment,
+      duration_ms: Date.now() - startedAt
+    });
+
+    res.json({ success: true, submissionId, correlationId, ...finalPayload, evidenceReport, humanOverrides: [] });
 
   } catch (error) {
+    logger.error('plagiarism_scan_failed', {
+      correlationId,
+      tenantId,
+      message: error.message,
+      duration_ms: Date.now() - startedAt
+    });
     res.status(400).json({ success: false, message: error.message });
   }
 });
@@ -431,7 +514,7 @@ router.get('/report/:submissionId', async (req, res) => {
             evidenceReport.sources = evidenceReport.sources.filter(source => !ignoredSources.has(source.sourceUrl));
         }
 
-        const latestSubmissionOverride = humanOverrides.find(override =>
+        const latestSubmissionOverride = [...humanOverrides].reverse().find(override =>
             override.action === 'mark_plagiarism' || override.action === 'mark_acceptable'
         );
         if (latestSubmissionOverride) {
