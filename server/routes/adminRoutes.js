@@ -2,11 +2,12 @@ import express from 'express';
 import crypto from 'crypto';
 import { getQuarantineQueue, getQuarantineItem, removeFromQuarantine } from '../utils/astHashDb.js';
 import { saveToDualStore } from '../utils/fingerprintIndex.js';
-import { generateWinnowingFingerprints } from '../utils/astRadar.js';
+import { generateWinnowingFingerprints, getAstParserHealth } from '../utils/astRadar.js';
 import { parser, grammars, extensionMap } from '../utils/parserInit.js';
 import db from '../db/database.js';
 import { enqueueIngestion } from '../utils/ingestionQueue.js';
 import { resolveTenantId } from '../utils/tenant.js';
+import { logger } from '../utils/logger.js';
 
 
 
@@ -49,9 +50,20 @@ router.post('/quarantine/:id/promote', async (req, res) => {
 
     parser.setLanguage(grammars[langKey]);
     const tree = parser.parse(item.rawCode);
+    const parserHealth = getAstParserHealth(tree.rootNode);
 
-    if (tree.rootNode.hasError) {
-      return res.status(400).json({ success: false, message: 'Parser error on raw code. Invalid syntax.' });
+    if (parserHealth.isSeverelyCorrupt) {
+      logger.warn('ast_parser_quarantine_promotion_rejected', {
+        tenantId,
+        fileName: item.fileName,
+        errorNodes: parserHealth.errorNodes,
+        totalNodes: parserHealth.totalNodes,
+        errorRatio: Number(parserHealth.errorRatio.toFixed(4))
+      });
+      return res.status(400).json({
+        success: false,
+        message: `Parser corruption too high to promote safely. Error ratio: ${parserHealth.errorRatio.toFixed(2)}.`
+      });
     }
 
     const fingerprints = generateWinnowingFingerprints(tree.rootNode);

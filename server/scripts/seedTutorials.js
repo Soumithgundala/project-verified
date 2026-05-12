@@ -1,7 +1,7 @@
 // server/scripts/seedTutorials.js
 import axios from 'axios';
 import { parser, grammars, extensionMap, initGitPulseParser } from '../utils/parserInit.js';
-import { generateWinnowingFingerprints } from '../utils/astRadar.js';
+import { generateWinnowingFingerprints, getAstParserHealth } from '../utils/astRadar.js';
 import { saveToDualStore } from '../utils/fingerprintIndex.js';
 import crypto from 'crypto';
 import queue, { enqueueIngestion } from '../utils/ingestionQueue.js';
@@ -64,7 +64,8 @@ async function seedDatabase(searchQuery) {
                         parser.setLanguage(grammars[langKey]);
                         
                         const tree = parser.parse(rawCode);
-                        if (!tree.rootNode.hasError) {
+                        const parserHealth = getAstParserHealth(tree.rootNode);
+                        if (!parserHealth.isSeverelyCorrupt) {
                             // Extract Winnowing fingerprints
                             const fps = generateWinnowingFingerprints(tree.rootNode);
                             if (fps && fps.length > 0) {
@@ -81,6 +82,9 @@ async function seedDatabase(searchQuery) {
                                 }, `Seeding ${file.path} from ${repo.full_name}`);
                             }
 
+                        }
+                        else {
+                            console.log(`[!] Skipping ${file.path} - parser error ratio ${parserHealth.errorRatio.toFixed(2)} exceeds threshold.`);
                         }
                     }
                 } catch (fileErr) {

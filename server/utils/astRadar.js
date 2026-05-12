@@ -2,9 +2,40 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { parser, grammars, extensionMap } from './parserInit.js';
+import { logger } from './logger.js';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+export const DEFAULT_AST_ERROR_RATIO_THRESHOLD = 0.15;
+
+export function getAstParserHealth(rootNode, threshold = DEFAULT_AST_ERROR_RATIO_THRESHOLD) {
+    let totalNodes = 0;
+    let errorNodes = 0;
+
+    function walk(node) {
+        if (!node) return;
+        totalNodes++;
+
+        if (node.type === 'ERROR' || node.type === 'MISSING' || node.isError === true || node.isMissing === true) {
+            errorNodes++;
+        }
+
+        for (let i = 0; i < node.childCount; i++) {
+            walk(node.child(i));
+        }
+    }
+
+    walk(rootNode);
+
+    const errorRatio = totalNodes > 0 ? errorNodes / totalNodes : 0;
+    return {
+        totalNodes,
+        errorNodes,
+        errorRatio,
+        hasErrors: errorNodes > 0 || Boolean(rootNode?.hasError),
+        isSeverelyCorrupt: errorRatio > threshold
+    };
+}
 
 // =================================================================
 // PURE UTILITY: Generates a SHA-256 hash from a Tree-Sitter rootNode.
@@ -47,13 +78,13 @@ function hashString(str) {
 // =================================================================
 export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName = "unknown") {
     const sequence = [];
-    
+
     function getNormalizedType(node) {
         if (node.type === 'identifier' || node.type === 'property_identifier') return 'VAR';
         if (node.type === 'number') return 'NUM';
         if (node.type === 'string' || node.type === 'string_fragment') return 'STR';
         if (node.type === 'true' || node.type === 'false') return 'BOOL';
-        
+
         const operatorMap = {
             '+': 'PLUS', '-': 'MINUS', '*': 'MUL', '/': 'DIV',
             '==': 'EQ', '===': 'EQ', '!=': 'NEQ', '!==': 'NEQ',
@@ -61,7 +92,7 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName 
             '&&': 'AND', '||': 'OR', '!': 'NOT', '=': 'ASSIGN'
         };
         if (operatorMap[node.type]) return operatorMap[node.type];
-        
+
         if (node.isNamed) {
             if (node.type === 'comment') return null;
             if (node.type.includes('function') || node.type.includes('method') || node.type.includes('arrow')) return 'FUNC';
@@ -73,7 +104,7 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName 
     // 1. Traverse and record positions (Selective Normalization)
     function traverse(node) {
         if (!node) return;
-        
+
         const normType = getNormalizedType(node);
         if (normType) {
             sequence.push({
@@ -111,14 +142,14 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName 
 
     for (let i = 0; i <= kGrams.length - w; i++) {
         let minGram = kGrams[i];
-        
+
         for (let j = i + 1; j < i + w; j++) {
             // Tie-breaker: <= ensures we pick the later occurrence in the window
             if (kGrams[j].hash <= minGram.hash) {
                 minGram = kGrams[j];
             }
         }
-        
+
         // Store in Map. If hash already exists, we keep the first occurrence 
         // (or you can choose to store an array of positions if it repeats)
         if (!fingerprints.has(minGram.hash)) {
@@ -155,17 +186,17 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
         const validFiles = treeResponse.data.tree.filter(f => {
             if (f.type !== 'blob' || f.size <= 200) return false;
             // Cap at ~150KB. Humans rarely write single files larger than this.
-            if (f.size > 153600) return false; 
+            if (f.size > 153600) return false;
 
             const lowerPath = f.path.toLowerCase();
-            
+
             // Check Blacklisted Directories
             if (excludedDirs.some(dir => lowerPath.includes(`/${dir}/`) || lowerPath.startsWith(`${dir}/`))) return false;
 
             // Check Blacklisted File Patterns (bundles, chunks, minified)
-            if (lowerPath.endsWith('.min.js') || 
-                lowerPath.endsWith('-bundle.js') || 
-                lowerPath.includes('chunk-') || 
+            if (lowerPath.endsWith('.min.js') ||
+                lowerPath.endsWith('-bundle.js') ||
+                lowerPath.includes('chunk-') ||
                 lowerPath.includes('test')) {
                 return false;
             }
@@ -191,8 +222,8 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
             // --- MINIFIED SINGLE-LINE CATCHER ---
             const lines = rawCode.split('\n');
             if (lines.length < 5 && rawCode.length > 5000) {
-                 console.log(`[!] Skipping ${file.path} - Detected minified single-line code.`);
-                 continue;
+                console.log(`[!] Skipping ${file.path} - Detected minified single-line code.`);
+                continue;
             }
 
             let fileScore = 0;
@@ -204,17 +235,26 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
                 if (grammars[langKey]) {
                     parser.setLanguage(grammars[langKey]);
                     const tree = parser.parse(rawCode);
-                    if (!tree.rootNode.hasError) {
+                    const parserHealth = getAstParserHealth(tree.rootNode);
+                    if (!parserHealth.isSeverelyCorrupt) {
                         const nodeCount = tree.rootNode.descendantCount;
                         const functionCount = (rawCode.match(/function|=>|class|def |class /g) || []).length;
                         const words = rawCode.match(/\b\w+\b/g) || [];
                         const uniqueTokens = new Set(words).size;
-                        
-                        fileScore = (nodeCount * 0.6) + (functionCount * 0.3) + (uniqueTokens * 0.1);
+
+                        const parserPenalty = parserHealth.hasErrors ? (1 - parserHealth.errorRatio) : 1;
+                        fileScore = ((nodeCount * 0.6) + (functionCount * 0.3) + (uniqueTokens * 0.1)) * parserPenalty;
+                    } else {
+                        logger.warn('ast_parser_severe_corruption', {
+                            fileName: file.path,
+                            errorNodes: parserHealth.errorNodes,
+                            totalNodes: parserHealth.totalNodes,
+                            errorRatio: Number(parserHealth.errorRatio.toFixed(4))
+                        });
                     }
                 }
             } else {
-                 fileScore = (rawCode.match(/function|=>|if|for|while|switch|class|catch/g) || []).length * 100;
+                fileScore = (rawCode.match(/function|=>|if|for|while|switch|class|catch/g) || []).length * 100;
             }
 
             if (!lightweight) {
@@ -240,6 +280,9 @@ export async function extractProjectFingerprints(owner, repo, latestSha, headers
         return null;
     }
 }
+
+// Backward-compatible alias for older fallback paths and scripts.
+export const extractProjectFingerprint = extractProjectFingerprints;
 
 // =================================================================
 // SEARCH: GitHub Code Search API — the Strike 2 fallback.
@@ -330,8 +373,8 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
             // Now "xeno-canto" and "xenocanto" will both become "xenocanto" and match perfectly!
             // We check for common package.json/requirements.txt formats:
             if (
-                superNormalizedConfig.includes(`"${superItem}"`) || 
-                superNormalizedConfig.includes(`${superItem}==`) || 
+                superNormalizedConfig.includes(`"${superItem}"`) ||
+                superNormalizedConfig.includes(`${superItem}==`) ||
                 superNormalizedConfig.includes(`${superItem}>=`) ||
                 superNormalizedConfig.includes(superItem) // Broad fallback
             ) {
@@ -344,10 +387,14 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
         if (unverified.length > 0) {
             try {
                 // Get the heaviest logic file's rawCode to check for API keys or libraries loaded dynamically
-                const fingerprint = await extractProjectFingerprint(owner, repo, latestSha, headers);
-                
-                if (fingerprint && fingerprint.rawCode) {
-                    const lowerRawCode = fingerprint.rawCode.toLowerCase();
+                const fingerprints = await extractProjectFingerprints(owner, repo, latestSha, headers, {
+                    candidateLimit: 5,
+                    limit: 5,
+                    lightweight: true
+                });
+
+                if (fingerprints && fingerprints.length > 0) {
+                    const lowerRawCode = fingerprints.map(fp => fp.rawCode).join('\n').toLowerCase();
                     unverified.forEach(item => {
                         // Check if the claim string appears in the logic code
                         if (lowerRawCode.includes(item.name)) {
@@ -360,8 +407,12 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
                     unverified.forEach(item => item.status = 'Parsing Failure - Minified/Invalid Syntax');
                 }
             } catch (fallbackErr) {
-                console.error("Deep Scan Fallback Failed:", fallbackErr.message);
-                unverified.forEach(item => item.status = 'Parsing Failure - Minified/Invalid Syntax');
+                logger.error('deep_scan_fallback_failed', {
+                    owner,
+                    repo,
+                    message: fallbackErr.message
+                });
+                unverified.forEach(item => item.status = 'Deep Scan Fallback Failure');
             }
         }
 
