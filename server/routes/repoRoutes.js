@@ -1,7 +1,7 @@
 import express from 'express';
 import axios from 'axios';
 import { analyzeRepositoryAST as generateLLMSummary } from '../utils/ai_wrapper.js';
-import { extractProjectFingerprints, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints, getAstParserHealth } from '../utils/astRadar.js';
+import { extractProjectFingerprints, huntGlobalClones, generateStructuralHash, generateWinnowingFingerprints, getAstParserHealth, countSemanticNodes, sanitizeCst } from '../utils/astRadar.js';
 import { lookupFingerprints, queueForCorpusReview } from '../utils/astHashDb.js';
 import { queryDualStore, getDetailedMatches, getDocumentsMetadata } from '../utils/fingerprintIndex.js';
 import repoCache from '../utils/diskCache.js';
@@ -156,8 +156,8 @@ router.post('/link-repo', async (req, res) => {
 
               const oldHealth = getAstParserHealth(treeOld.rootNode);
               const newHealth = getAstParserHealth(treeNew.rootNode);
-              n1 = treeOld.rootNode.descendantCount;
-              n2 = treeNew.rootNode.descendantCount;
+              n1 = countSemanticNodes(treeOld.rootNode);
+              n2 = countSemanticNodes(treeNew.rootNode);
               d  = Math.abs(n2 - n1);
               parserDiagnostics = {
                 status: 'clean',
@@ -184,7 +184,7 @@ router.post('/link-repo', async (req, res) => {
                   cstStr = `(ERROR) Severe parser corruption detected. Old error ratio: ${parserDiagnostics.oldErrorRatio}; New error ratio: ${parserDiagnostics.newErrorRatio}. Structural score downgraded instead of silently reporting zero evidence.`;
               } else {
                   r  = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
-                  cstStr = treeNew.rootNode.toString().substring(0, 500) + '...';
+                  cstStr = sanitizeCst(treeNew.rootNode);
                   if (oldHealth.hasErrors || newHealth.hasErrors) {
                     parserDiagnostics.status = 'partial_parse_used';
                     logger.warn('ast_parser_partial_parse_used', {
