@@ -218,22 +218,22 @@ const SOURCE_TRUST_WEIGHTS = {
 function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints, totalMatchedFingerprints, largestSegmentFpCount) {
     // Gate 1: Absolute minimum count
     if (totalMatchedFingerprints < MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION) {
-        return 'LOW_CONFIDENCE';
+        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Absolute Gate: Only ${totalMatchedFingerprints} matching fingerprints found across the project (minimum required: ${MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION}). Evidence is too sparse to definitively prove plagiarism.` };
     }
 
     // Gate 2: Relative minimum ratio (8% of total FPs must match)
     const relativeRatio = totalFingerprints > 0 ? totalMatchedFingerprints / totalFingerprints : 0;
     if (relativeRatio < MIN_RELATIVE_MATCH) {
-        return 'LOW_CONFIDENCE';
+        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Relative Gate: Matches represent only ${(relativeRatio * 100).toFixed(1)}% of the student's project codebase (minimum required: ${(MIN_RELATIVE_MATCH * 100).toFixed(1)}%). Indicates incidental boilerplate or minor copied snippets rather than structural plagiarism.` };
     }
 
     // Gate 3: At least one coherent copied block (not just scattered fragments)
     if ((largestSegmentFpCount || 0) < MIN_LARGEST_SEGMENT_FPS) {
-        return 'LOW_CONFIDENCE';
+        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Coherence Gate: The largest coherent matched block was only ${largestSegmentFpCount || 0} fingerprints long (minimum required: ${MIN_LARGEST_SEGMENT_FPS}). Matches consist of highly fragmented, scattered single-line collisions, typically indicating common syntax usage rather than copied logic.` };
     }
 
     // 1. Full Clone Priority
-    if (projectContainment > CALIBRATION.fullCloneContainment && dominance > CALIBRATION.fullCloneDominance) return 'FULL_CLONE';
+    if (projectContainment > CALIBRATION.fullCloneContainment && dominance > CALIBRATION.fullCloneDominance) return { type: 'FULL_CLONE' };
     
     // 2. Mosaic Check
     const segmentRatio = totalFingerprints > 0 ? (totalSegments / totalFingerprints) : 0;
@@ -242,13 +242,13 @@ function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalS
         totalSegments >= CALIBRATION.mosaicMinSegments &&
         segmentRatio > CALIBRATION.mosaicSegmentRatio
     ) {
-        return 'MOSAIC';
+        return { type: 'MOSAIC' };
     }
 
     // 3. Partial Clone Check
-    if (projectContainment > CALIBRATION.partialCloneContainment) return 'PARTIAL_CLONE';
+    if (projectContainment > CALIBRATION.partialCloneContainment) return { type: 'PARTIAL_CLONE' };
     
-    return 'LOW_CONFIDENCE';
+    return { type: 'LOW_CONFIDENCE', reason: 'Rejected by Confidence Thresholds: Containment or dominance signals did not meet the required thresholds for classification.' };
 }
 
 /**
@@ -262,7 +262,8 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         totalMatchedFingerprints: 0,
         minimumEvidenceThreshold: MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION,
         calibration: CALIBRATION,
-        sources: []
+        sources: [],
+        suppressedSources: []
     };
 
     if (!studentFingerprints || studentFingerprints.length === 0) return result;
@@ -325,6 +326,10 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
     const topSources = candidateSources.slice(0, 3);
     
     // Project Aggregation
+    let uniqueSourcesCount = 0;
+    let totalSegmentsCount = 0;
+    let largestSegmentFpCount = 0;
+
     if (topSources.length > 0) {
         // Dominance
         const dominantSource = topSources[0];
@@ -339,11 +344,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         result.projectContainment = parseFloat((uniqueMatchedFingerprints.size / totalStudentFingerprints).toFixed(2));
         result.totalMatchedFingerprints = uniqueMatchedFingerprints.size;
 
-        // Plagiarism Classification
-        const uniqueSourcesCount = topSources.length;
-        let totalSegmentsCount = 0;
-        // Track the largest single segment by fingerprint count for the coherence gate
-        let largestSegmentFpCount = 0;
+        uniqueSourcesCount = topSources.length;
         for (const s of topSources) {
             totalSegmentsCount += s.segments.length;
             for (const seg of s.rawSegments || []) {
@@ -352,21 +353,26 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
                 }
             }
         }
+    }
 
-        // Exclude boilerplate-dominant sources from FULL_CLONE
-        const dominantSourceOrigin = topSources[0]?.sourceOrigin || 'unknown';
-        if (dominantSourceOrigin === 'boilerplate') {
-            result.plagiarismType = 'BOILERPLATE_HEAVY';
-        } else {
-            result.plagiarismType = classifyPlagiarism(
-                result.projectContainment, 
-                result.dominanceScore, 
-                uniqueSourcesCount, 
-                totalSegmentsCount, 
-                totalStudentFingerprints,
-                result.totalMatchedFingerprints,
-                largestSegmentFpCount
-            );
+    // Always classify, even if topSources is empty, to get the absolute gate reason
+    const dominantSourceOrigin = topSources[0]?.sourceOrigin || 'unknown';
+    if (topSources.length > 0 && dominantSourceOrigin === 'boilerplate') {
+        result.plagiarismType = 'BOILERPLATE_HEAVY';
+        result.rejectionReason = 'Low-trust boilerplate matches were suppressed from primary classification.';
+    } else {
+        const classification = classifyPlagiarism(
+            result.projectContainment, 
+            result.dominanceScore, 
+            uniqueSourcesCount, 
+            totalSegmentsCount, 
+            totalStudentFingerprints,
+            result.totalMatchedFingerprints,
+            largestSegmentFpCount
+        );
+        result.plagiarismType = classification.type;
+        if (classification.reason) {
+            result.rejectionReason = classification.reason;
         }
     }
 
@@ -396,6 +402,11 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
                 avgConfidence: avgConfidence
             }
         });
+    }
+
+    if (result.plagiarismType === 'LOW_CONFIDENCE' || result.plagiarismType === 'BOILERPLATE_HEAVY') {
+        result.suppressedSources = result.sources;
+        result.sources = [];
     }
 
     // Scale final containments
