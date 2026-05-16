@@ -87,6 +87,15 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
                 {data.intelligence.globalOriginality?.status || 'Pending'}
               </h3>
 
+              {data.intelligence.globalOriginality?.status === 'Original' && (
+                <div style={{ marginBottom: '15px', padding: '8px', borderRadius: '6px', backgroundColor: (hasParseFailure || hasFallbackFailure) ? '#fffbeb' : '#f0fdf4', border: `1px solid ${(hasParseFailure || hasFallbackFailure) ? '#fde68a' : '#bbf7d0'}` }}>
+                  <p style={{ margin: 0, fontSize: '10px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Verification Confidence</p>
+                  <p style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 'bold', color: (hasParseFailure || hasFallbackFailure) ? '#d97706' : '#166534' }}>
+                    {(hasParseFailure || hasFallbackFailure) ? 'Parser-Degraded No-Match' : 'Clean No-Match'}
+                  </p>
+                </div>
+              )}
+
               {data.intelligence.globalOriginality?.similarityScore && (
                 <div className="pdf-intel-sim-box">
                   <p className="pdf-intel-sim-label">AST STRUCTURAL SIMILARITY:</p>
@@ -186,10 +195,77 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
               </div>
             ))
           ) : (
-            <p className="pdf-evidence-empty">
-              No qualifying evidence receipts passed the confidence threshold.
-              {(hasParseFailure || hasFallbackFailure) ? ' Analysis diagnostics above indicate this may be due to parser or fallback degradation.' : ''}
-            </p>
+            <div className="pdf-evidence-empty-box">
+              <p className="pdf-evidence-empty">
+                {evidenceReport.rejectionReason ? (
+                  <strong>{evidenceReport.rejectionReason}</strong>
+                ) : (
+                  "No qualifying evidence receipts passed the confidence threshold."
+                )}
+                {(hasParseFailure || hasFallbackFailure) ? ' Analysis diagnostics above indicate this may be due to parser or fallback degradation.' : ''}
+              </p>
+            </div>
+          )}
+
+          {evidenceReport.suppressedSources && evidenceReport.suppressedSources.length > 0 && (
+            <div className="pdf-suppressed-section" style={{ marginTop: '30px', borderTop: '2px dashed #cbd5e1', paddingTop: '20px' }}>
+              <h4 className="pdf-section-title" style={{ color: '#64748b', borderBottom: 'none', marginBottom: '5px' }}>
+                <span style={{ fontSize: '18px', marginRight: '8px' }}>🛡️</span>
+                Suppressed Evidence Receipts
+              </h4>
+              <p className="pdf-evidence-explanation" style={{ marginBottom: '15px' }}>
+                The following raw receipts were detected by the system but suppressed from the final classification because they were rejected by the integrity gates.
+              </p>
+              {evidenceReport.suppressedSources.map((source, sourceIndex) => (
+                <div key={source.docId || sourceIndex} className="pdf-receipt-box suppressed" style={{ opacity: 0.8, background: '#f8fafc' }}>
+                  <div className="pdf-receipt-header">
+                    <div>
+                      <p className="pdf-receipt-label">Source URL</p>
+                      <p className="pdf-receipt-url">{source.sourceUrl}</p>
+                    </div>
+                    <div className="pdf-receipt-score">
+                      <span>{source.containment}%</span>
+                      <small>containment</small>
+                    </div>
+                  </div>
+                  <div className="pdf-receipt-meta">
+                    <span>Origin: {source.sourceOrigin}</span>
+                    <span>Trust weight: {source.trustWeight}</span>
+                    <span>File: {source.fileName}</span>
+                  </div>
+                  {source.sourceOrigin === 'boilerplate' && (
+                    <p className="pdf-boilerplate-note">Low-trust boilerplate match suppressed from primary classification.</p>
+                  )}
+                  <table className="pdf-receipt-table">
+                    <thead>
+                      <tr>
+                        <th>Student Lines</th>
+                        <th>Source Lines</th>
+                        <th>Fingerprints</th>
+                        <th>Confidence</th>
+                        <th>Breakdown</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(source.topSegments || []).map((segment, index) => (
+                        <tr key={index}>
+                          <td>{segment.student?.startLine}-{segment.student?.endLine}</td>
+                          <td>{segment.source?.startLine}-{segment.source?.endLine}</td>
+                          <td>{segment.fingerprintCount || segment.hashIds?.length || 'n/a'}</td>
+                          <td>{Math.round((segment.confidence?.score || 0) * 100)}% {segment.confidence?.label}</td>
+                          <td>
+                            D {segment.confidence?.breakdown?.density ?? 0},
+                            L {segment.confidence?.breakdown?.length ?? 0},
+                            U {segment.confidence?.breakdown?.uniqueness ?? 0},
+                            C {segment.confidence?.breakdown?.coherence ?? 0}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
