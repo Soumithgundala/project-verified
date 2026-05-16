@@ -38,6 +38,45 @@ export function getAstParserHealth(rootNode, threshold = DEFAULT_AST_ERROR_RATIO
 }
 
 // =================================================================
+// SANITY CHECKS: Extract clean semantic metrics from the syntax tree
+// =================================================================
+export function countSemanticNodes(node) {
+    if (!node) return 0;
+    let count = 0;
+    // We only count named nodes (which usually correspond to semantic constructs)
+    // and exclude comments, ERROR, and MISSING nodes
+    if (node.isNamed && node.type !== 'comment' && node.type !== 'ERROR' && !node.isMissing && !node.isError) {
+        count = 1;
+    }
+    for (let i = 0; i < node.childCount; i++) {
+        count += countSemanticNodes(node.child(i));
+    }
+    return count;
+}
+
+export function sanitizeCst(node, maxLines = 150) {
+    if (!node) return "";
+    let lines = [];
+    
+    function walk(n, depth) {
+        if (lines.length >= maxLines) return;
+        if (!n) return;
+        
+        if (n.isNamed && n.type !== 'comment' && !n.isMissing && !n.isError) {
+             lines.push("  ".repeat(depth) + n.type);
+             for (let i = 0; i < n.childCount; i++) {
+                 walk(n.child(i), depth + 1);
+             }
+        } else if (!n.isNamed && (n.type === 'ERROR' || n.isError)) {
+             lines.push("  ".repeat(depth) + "(ERROR)");
+        }
+    }
+    
+    walk(node, 0);
+    return lines.join("\n") + (lines.length >= maxLines ? "\n..." : "");
+}
+
+// =================================================================
 // PURE UTILITY: Generates a SHA-256 hash from a Tree-Sitter rootNode.
 // Only encodes structural grammar types — ignores all variable names,
 // strings, and whitespace. This makes it rename-proof.
