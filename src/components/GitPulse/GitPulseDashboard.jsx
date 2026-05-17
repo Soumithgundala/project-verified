@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
-import { 
-  ShieldCheck, ShieldAlert, CheckCircle, Users, Terminal, GitCommit, 
+import {
+  ShieldCheck, ShieldAlert, CheckCircle, Users, Terminal, GitCommit,
   Fingerprint, Layers, Cpu, Activity, FileText, XCircle, AlertCircle, Flag, Ban
 } from 'lucide-react';
 import '../styles/GitPulse/GitPulseDashboard.css';
@@ -52,17 +52,17 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
           humanOverrides: [...(current.humanOverrides || []), result.override],
           evidenceReport: current.evidenceReport
             ? {
-                ...current.evidenceReport,
-                humanOverride: action === 'ignore_source' ? current.evidenceReport.humanOverride : result.override,
-                plagiarismType: action === 'mark_plagiarism'
-                  ? 'HUMAN_CONFIRMED_PLAGIARISM'
-                  : action === 'mark_acceptable'
-                    ? 'HUMAN_MARKED_ACCEPTABLE'
-                    : current.evidenceReport.plagiarismType,
-                sources: action === 'ignore_source' && sourceUrl
-                  ? current.evidenceReport.sources.filter((source) => source.sourceUrl !== sourceUrl)
-                  : current.evidenceReport.sources
-              }
+              ...current.evidenceReport,
+              humanOverride: action === 'ignore_source' ? current.evidenceReport.humanOverride : result.override,
+              plagiarismType: action === 'mark_plagiarism'
+                ? 'HUMAN_CONFIRMED_PLAGIARISM'
+                : action === 'mark_acceptable'
+                  ? 'HUMAN_MARKED_ACCEPTABLE'
+                  : current.evidenceReport.plagiarismType,
+              sources: action === 'ignore_source' && sourceUrl
+                ? current.evidenceReport.sources.filter((source) => source.sourceUrl !== sourceUrl)
+                : current.evidenceReport.sources
+            }
             : current.evidenceReport
         }));
       }
@@ -143,11 +143,10 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
               {/* Alignment Score Badge */}
               <div className="matrix-score-badge">
                 <p className="matrix-score-label">Alignment Score</p>
-                <span className={`matrix-score-value ${
-                  data.alignmentScore >= 80 ? 'matrix-score-high' :
+                <span className={`matrix-score-value ${data.alignmentScore >= 80 ? 'matrix-score-high' :
                   data.alignmentScore >= 50 ? 'matrix-score-medium' :
-                  'matrix-score-low'
-                }`}>
+                    'matrix-score-low'
+                  }`}>
                   {data.alignmentScore}%
                 </span>
               </div>
@@ -157,15 +156,14 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
               {data.matrix.map((item, index) => {
                 const isVerified = item.status.includes('Verified');
                 const isMissing = item.status.includes('Missing');
-                
+
                 return (
-                  <div 
-                    key={index} 
-                    className={`matrix-item ${
-                      isVerified ? 'matrix-item-verified' : 
-                      isMissing ? 'matrix-item-missing' : 
-                      'matrix-item-warning'
-                    }`}
+                  <div
+                    key={index}
+                    className={`matrix-item ${isVerified ? 'matrix-item-verified' :
+                      isMissing ? 'matrix-item-missing' :
+                        'matrix-item-warning'
+                      }`}
                   >
                     <div className="matrix-item-left">
                       {isVerified ? (
@@ -175,21 +173,19 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                       ) : (
                         <AlertCircle size={18} style={{ color: '#f59e0b' }} />
                       )}
-                      
-                      <span className={`matrix-item-name ${
-                        isVerified ? 'matrix-name-verified' : 
-                        isMissing ? 'matrix-name-missing' : 
-                        'matrix-name-warning'
-                      }`}>
+
+                      <span className={`matrix-item-name ${isVerified ? 'matrix-name-verified' :
+                        isMissing ? 'matrix-name-missing' :
+                          'matrix-name-warning'
+                        }`}>
                         {item.name}
                       </span>
                     </div>
-                    
-                    <span className={`matrix-item-status ${
-                      isVerified ? 'matrix-status-verified' : 
-                      isMissing ? 'matrix-status-missing' : 
-                      'matrix-status-warning'
-                    }`}>
+
+                    <span className={`matrix-item-status ${isVerified ? 'matrix-status-verified' :
+                      isMissing ? 'matrix-status-missing' :
+                        'matrix-status-warning'
+                      }`}>
                       {item.status}
                     </span>
                   </div>
@@ -262,9 +258,9 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                     <div>
                       <p className="author-score-label">Avg Score</p>
                       <div style={{ textAlign: 'right' }}>
-                         <span className={`author-score-value ${authorScoreClass}`}>
-                           {author.averageScore.toFixed(2)}
-                         </span>
+                        <span className={`author-score-value ${authorScoreClass}`}>
+                          {author.averageScore.toFixed(2)}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -342,6 +338,29 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                     <p className="review-error">{overrideState.error}</p>
                   )}
 
+                  {data.humanOverrides && data.humanOverrides.length > 0 && (
+                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0', width: '100%' }}>
+                      <p style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Review Audit Trail</p>
+                      <div className="scrollable" style={{ maxHeight: '180px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {data.humanOverrides.map((override, idx) => (
+                          <div key={override.overrideId || idx} style={{ backgroundColor: '#ffffff', padding: '0.75rem', borderRadius: '0.375rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                              <span style={{ fontWeight: 500 }}>{override.reviewerId || 'Unspecified Reviewer'}</span>
+                              <span>{new Date(override.createdAt).toLocaleString()}</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem', fontWeight: 500, color: '#334155', marginBottom: '0.25rem' }}>
+                              {override.action === 'mark_plagiarism' ? <Flag size={14} style={{ color: '#ef4444' }} /> :
+                                override.action === 'mark_acceptable' ? <CheckCircle size={14} style={{ color: '#10b981' }} /> :
+                                  override.action === 'ignore_source' ? <Ban size={14} style={{ color: '#f59e0b' }} /> : null}
+                              <span style={{ textTransform: 'capitalize' }}>{override.action.replace('_', ' ')}</span>
+                            </div>
+                            {override.reason && <p style={{ color: '#475569', fontStyle: 'italic', fontSize: '0.75rem', margin: 0 }}>"{override.reason}"</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {visibleMatches.length > 0 && (
                     <div className="source-matches-wrap">
                       <p className="source-matches-label">Identified Source:</p>
@@ -386,6 +405,134 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
           </div>
         )}
 
+        {/* --- FORENSIC EVIDENCE RECEIPTS --- */}
+        {data.evidenceReport && (
+          <div className="card matrix-card">
+            <div className="matrix-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                <h3 className="matrix-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                  <ShieldAlert size={20} style={{ color: '#4f46e5' }} /> Forensic Evidence Receipts
+                </h3>
+                <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem' }}>
+                  <div><span style={{ color: '#64748b' }}>Classification:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.plagiarismType}</span></div>
+                  <div><span style={{ color: '#64748b' }}>Containment:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.projectContainment}%</span></div>
+                  <div><span style={{ color: '#64748b' }}>Dominance:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.dominanceScore}%</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="scrollable" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
+              {data.evidenceReport.sources?.length > 0 ? (
+                data.evidenceReport.sources.map((source, sourceIndex) => (
+                  <div key={source.docId || sourceIndex} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <div style={{ wordBreak: 'break-all', fontWeight: 500, color: '#3b82f6', fontSize: '0.875rem' }}>{source.sourceUrl}</div>
+                      <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.875rem' }}>{source.containment}% containment</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                      <span>Origin: {source.sourceOrigin}</span>
+                      <span>Trust: {source.trustWeight}</span>
+                      <span>File: {source.fileName}</span>
+                    </div>
+                    {source.sourceOrigin === 'boilerplate' && (
+                      <p style={{ fontSize: '0.75rem', color: '#f59e0b', marginBottom: '0.5rem', fontStyle: 'italic' }}>Low-trust boilerplate match suppressed from primary classification.</p>
+                    )}
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: '0.75rem', textAlign: 'left', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
+                            <th style={{ padding: '0.5rem' }}>Student Lines</th>
+                            <th style={{ padding: '0.5rem' }}>Source Lines</th>
+                            <th style={{ padding: '0.5rem' }}>Fingerprints</th>
+                            <th style={{ padding: '0.5rem' }}>Confidence</th>
+                            <th style={{ padding: '0.5rem' }}>Breakdown</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(source.topSegments || []).map((segment, index) => (
+                            <tr key={index} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '0.5rem' }}>{segment.student?.startLine}-{segment.student?.endLine}</td>
+                              <td style={{ padding: '0.5rem' }}>{segment.source?.startLine}-{segment.source?.endLine}</td>
+                              <td style={{ padding: '0.5rem' }}>{segment.fingerprintCount || segment.hashIds?.length || 'n/a'}</td>
+                              <td style={{ padding: '0.5rem' }}>{Math.round((segment.confidence?.score || 0) * 100)}% {segment.confidence?.label}</td>
+                              <td style={{ padding: '0.5rem' }}>
+                                D {segment.confidence?.breakdown?.density ?? 0},
+                                L {segment.confidence?.breakdown?.length ?? 0},
+                                U {segment.confidence?.breakdown?.uniqueness ?? 0},
+                                C {segment.confidence?.breakdown?.coherence ?? 0}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: '1rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
+                  {data.evidenceReport.rejectionReason ? (
+                    <strong>{data.evidenceReport.rejectionReason}</strong>
+                  ) : (
+                    "No qualifying evidence receipts passed the confidence threshold."
+                  )}
+                </div>
+              )}
+
+              {/* Suppressed Sources */}
+              {data.evidenceReport.suppressedSources && data.evidenceReport.suppressedSources.length > 0 && (
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '2px dashed #cbd5e1' }}>
+                  <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '1.25rem' }}>🛡️</span> Suppressed Evidence Receipts
+                  </h4>
+                  <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '1rem' }}>The following raw receipts were detected by the system but suppressed from the final classification because they were rejected by the integrity gates.</p>
+
+                  {data.evidenceReport.suppressedSources.map((source, sourceIndex) => (
+                    <div key={source.docId || sourceIndex} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f1f5f9', opacity: 0.8, marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <div style={{ wordBreak: 'break-all', fontWeight: 500, color: '#64748b', fontSize: '0.875rem' }}>{source.sourceUrl}</div>
+                        <div style={{ fontWeight: 600, color: '#64748b', fontSize: '0.875rem' }}>{source.containment}% containment</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
+                        <span>Origin: {source.sourceOrigin}</span>
+                        <span>Trust: {source.trustWeight}</span>
+                        <span>File: {source.fileName}</span>
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', fontSize: '0.75rem', textAlign: 'left', borderCollapse: 'collapse', color: '#64748b' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
+                              <th style={{ padding: '0.5rem' }}>Student Lines</th>
+                              <th style={{ padding: '0.5rem' }}>Source Lines</th>
+                              <th style={{ padding: '0.5rem' }}>Fingerprints</th>
+                              <th style={{ padding: '0.5rem' }}>Confidence</th>
+                              <th style={{ padding: '0.5rem' }}>Breakdown</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(source.topSegments || []).map((segment, index) => (
+                              <tr key={index} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                <td style={{ padding: '0.5rem' }}>{segment.student?.startLine}-{segment.student?.endLine}</td>
+                                <td style={{ padding: '0.5rem' }}>{segment.source?.startLine}-{segment.source?.endLine}</td>
+                                <td style={{ padding: '0.5rem' }}>{segment.fingerprintCount || segment.hashIds?.length || 'n/a'}</td>
+                                <td style={{ padding: '0.5rem' }}>{Math.round((segment.confidence?.score || 0) * 100)}% {segment.confidence?.label}</td>
+                                <td style={{ padding: '0.5rem' }}>
+                                  D {segment.confidence?.breakdown?.density ?? 0},
+                                  L {segment.confidence?.breakdown?.length ?? 0},
+                                  U {segment.confidence?.breakdown?.uniqueness ?? 0},
+                                  C {segment.confidence?.breakdown?.coherence ?? 0}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
