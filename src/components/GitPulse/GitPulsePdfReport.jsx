@@ -7,11 +7,31 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
   const humanOverrides = data.humanOverrides || [];
   const parserDiagnostics = data.analysis?.parserDiagnostics;
   const hasParseFailure = parserDiagnostics?.status === 'severe_parse_failure' ||
+    parserDiagnostics?.status === 'degraded_line_fallback' ||
+    parserDiagnostics?.status === 'fragment_recovered' ||
     data.analysis?.cst?.includes('(ERROR)') ||
+    data.analysis?.cst?.includes('Parser degradation detected') ||
     data.intelligence?.globalOriginality?.status?.includes('Parsing Failure');
   const hasFallbackFailure = (data.matrix || []).some(row =>
     row.status.includes('Parsing Failure') || row.status.includes('Fallback Failure')
   );
+  const zeroMatchState = evidenceReport?.totalMatchedFingerprints === 0;
+  const evidenceGateLabel = evidenceReport?.minimumEvidenceThreshold
+    ? `${evidenceReport.totalMatchedFingerprints || 0} / ${evidenceReport.minimumEvidenceThreshold} fingerprints`
+    : `${evidenceReport?.totalMatchedFingerprints || 0} fingerprints`;
+
+  const buildEvidenceHeadline = () => {
+    if (!evidenceReport) return null;
+    if (zeroMatchState) {
+      return hasParseFailure || hasFallbackFailure
+        ? 'No forensic receipts were produced. The current report is parser-degraded, so zero matches should be treated as inconclusive rather than clean.'
+        : 'No forensic receipts were produced. The current corpus comparison found zero structural overlaps in the analyzed files.';
+    }
+    if (evidenceReport.plagiarismType === 'LOW_CONFIDENCE') {
+      return `Some structural overlap was found, but only ${evidenceGateLabel} passed into the evidence gates, so the system withheld a plagiarism classification.`;
+    }
+    return null;
+  };
 
   const buildClassificationExplanation = () => {
     if (!evidenceReport) return null;
@@ -23,6 +43,14 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
 
     if (evidenceReport.plagiarismType === 'BOILERPLATE_HEAVY') {
       return 'Low-trust boilerplate matches were suppressed from primary classification.';
+    }
+
+    if (zeroMatchState) {
+      return `Evidence gate status: ${evidenceGateLabel}. ${evidenceReport.rejectionReason}`;
+    }
+
+    if (evidenceReport.plagiarismType === 'LOW_CONFIDENCE') {
+      return `Evidence gate status: ${evidenceGateLabel}. ${evidenceReport.rejectionReason || 'The overlap signal was too weak or fragmented to classify.'}`;
     }
 
     const largestSegmentText = largestSegment.fingerprintCount
@@ -131,7 +159,7 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
           <div className="pdf-evidence-summary">
             <div>
               <p className="pdf-stat-label">Classification</p>
-              <p className="pdf-evidence-classification">{evidenceReport.plagiarismType}</p>
+              <p className="pdf-evidence-classification">{evidenceReport.plagiarismType === 'NO_MATCH' ? 'NO_MATCH' : evidenceReport.plagiarismType}</p>
             </div>
             <div>
               <p className="pdf-stat-label">Containment</p>
@@ -141,6 +169,16 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
               <p className="pdf-stat-label">Dominance</p>
               <p className="pdf-evidence-metric">{evidenceReport.dominanceScore}%</p>
             </div>
+          </div>
+          <div className="pdf-diagnostic-note">
+            <h3>Evidence Gate</h3>
+            <p>{buildEvidenceHeadline() || `Matched fingerprints that reached evidence gating: ${evidenceGateLabel}.`}</p>
+            {parserDiagnostics && (
+              <p>
+                Parser status: <strong>{parserDiagnostics.status}</strong>
+                {parserDiagnostics.usedFragmentRecovery ? ' with fragment recovery applied.' : ''}
+              </p>
+            )}
           </div>
           <p className="pdf-evidence-explanation">{buildClassificationExplanation()}</p>
 
@@ -197,10 +235,10 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
           ) : (
             <div className="pdf-evidence-empty-box">
               <p className="pdf-evidence-empty">
-                {evidenceReport.rejectionReason ? (
+                {!zeroMatchState && evidenceReport.rejectionReason ? (
                   <strong>{evidenceReport.rejectionReason}</strong>
                 ) : (
-                  "No qualifying evidence receipts passed the confidence threshold."
+                  buildEvidenceHeadline() || "No qualifying evidence receipts passed the confidence threshold."
                 )}
                 {(hasParseFailure || hasFallbackFailure) ? ' Analysis diagnostics above indicate this may be due to parser or fallback degradation.' : ''}
               </p>

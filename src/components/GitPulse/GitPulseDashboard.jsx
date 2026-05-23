@@ -435,7 +435,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                   <ShieldAlert size={20} style={{ color: '#4f46e5' }} /> Forensic Evidence Receipts
                 </h3>
                 <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem' }}>
-                  <div><span style={{ color: '#64748b' }}>Classification:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.plagiarismType}</span></div>
+                  <div><span style={{ color: '#64748b' }}>Classification:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.plagiarismType === 'NO_MATCH' ? 'NO_MATCH' : data.evidenceReport.plagiarismType}</span></div>
                   <div><span style={{ color: '#64748b' }}>Containment:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.projectContainment}%</span></div>
                   <div><span style={{ color: '#64748b' }}>Dominance:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.dominanceScore}%</span></div>
                 </div>
@@ -510,10 +510,14 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                 ))
               ) : (
                 <div style={{ padding: '1rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
-                  {data.evidenceReport.rejectionReason ? (
+                  {!zeroMatchState && data.evidenceReport.rejectionReason ? (
                     <strong>{data.evidenceReport.rejectionReason}</strong>
                   ) : (
-                    "No qualifying evidence receipts passed the confidence threshold."
+                    zeroMatchState
+                      ? (hasParseDegradation
+                        ? 'No receipts were produced, and the parser reported degradation. This result is inconclusive rather than a clean no-match.'
+                        : 'No matching fingerprints were found, and the origin check also returned a clean no-match.')
+                      : "No qualifying evidence receipts passed the confidence threshold."
                   )}
                   {minimumEvidenceThreshold > 0 && (
                     <p style={{ marginTop: '0.75rem', fontWeight: 500 }}>
