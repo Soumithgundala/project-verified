@@ -24,7 +24,7 @@ const headers = env.GITHUB_TOKEN
 export { parseGithubUrl };
 
 const MODULE_VERSIONS = {
-  commits:     3,
+  commits:     4,
   llmSummary:  1,
   originality: 6,
 };
@@ -85,6 +85,9 @@ function computeIntegrityScore({ oldNodes, newNodes, oldHealth, newHealth, fileM
   const shrinkRatio = oldNodes > 0 ? negativeGrowth / oldNodes : 0;
   const sizeFactor = Math.min(1, maxNodes / 120);
   const smallChange = maxNodes < 30 && delta <= 8;
+  const additions = Math.max(0, Number(fileMeta.additions) || 0);
+  const deletions = Math.max(0, Number(fileMeta.deletions) || 0);
+  const totalChanges = Math.max(additions + deletions, Number(fileMeta.changes) || 0);
 
   let score = 1 - (delta / maxNodes);
   score -= growthRatio * 0.35 * sizeFactor;
@@ -96,8 +99,20 @@ function computeIntegrityScore({ oldNodes, newNodes, oldHealth, newHealth, fileM
     score = Math.max(score, 0.7);
   }
 
-  const additions = Math.max(0, Number(fileMeta.additions) || 0);
-  const deletions = Math.max(0, Number(fileMeta.deletions) || 0);
+  if (totalChanges <= 4) {
+    score = Math.max(score, 0.94);
+  } else if (totalChanges <= 10) {
+    score = Math.max(score, 0.86);
+  } else if (totalChanges <= 24) {
+    score = Math.max(score, 0.76);
+  } else if (totalChanges <= 50) {
+    score = Math.max(score, 0.62);
+  }
+
+  if (additions <= 8 && deletions <= 4) {
+    score = Math.max(score, 0.8);
+  }
+
   if (deletions > 0 && additions <= 2 && newNodes <= oldNodes) {
     score = Math.max(score, 0.72);
   }
@@ -107,6 +122,29 @@ function computeIntegrityScore({ oldNodes, newNodes, oldHealth, newHealth, fileM
   }
 
   return clampScore(score);
+}
+
+function normalizeEvidenceVerdict(evidenceReport, analysisPayload = null) {
+  if (!evidenceReport) return evidenceReport;
+
+  const originalityStatus = analysisPayload?.intelligence?.globalOriginality?.status || '';
+  const parserStatus = analysisPayload?.analysis?.parserDiagnostics?.status || '';
+  const parserDegraded = [
+    'severe_parse_failure',
+    'degraded_line_fallback',
+    'fragment_recovered',
+    'partial_parse_used'
+  ].includes(parserStatus) || String(analysisPayload?.analysis?.cst || '').includes('Parser degradation detected');
+
+  if (evidenceReport.totalMatchedFingerprints === 0 && originalityStatus === 'Original' && !parserDegraded) {
+    return {
+      ...evidenceReport,
+      plagiarismType: 'NO_MATCH',
+      rejectionReason: 'No matching fingerprints were found, and the origin check also returned a clean no-match. This repository currently has no structural overlap evidence in the indexed corpus.'
+    };
+  }
+
+  return evidenceReport;
 }
 
 function extractWinnowingForFiles(fingerprints) {
@@ -314,7 +352,7 @@ router.post('/link-repo', async (req, res) => {
     };
     combinedResults.forEach(item => {
       if      (item.score >= 0.85) clusters.authentic.commits.push(item);
-      else if (item.score >= 0.45) clusters.standard.commits.push(item);
+      else if (item.score >= 0.3) clusters.standard.commits.push(item);
       else                         clusters.suspect.commits.push(item);
     });
     const latest = historyLog[0] || { details: { n1: 0, n2: 0, d: 0, cstStr: "" }, score: 1 };
@@ -527,7 +565,7 @@ router.post('/link-repo', async (req, res) => {
         newNodeCount: latest.details.n2,
         editDistance: latest.details.d,
         rewardScore:  latest.score,
-        status: latest.score < 0.4 ? "Suspect (AI-Generated?)" : "Authentic",
+        status: latest.score < 0.3 ? "Suspect (AI-Generated?)" : "Authentic",
         cst: latest.details.cstStr,
         parserDiagnostics: latest.details.parserDiagnostics || null
       }
@@ -550,7 +588,10 @@ router.post('/link-repo', async (req, res) => {
     const matchesByDoc = await getDetailedMatches(studentWinnowingFps, { tenantId });
     const docIds = Object.keys(matchesByDoc);
     const meta = await getDocumentsMetadata(docIds, tenantId);
-    const evidenceReport = buildProjectReport(studentWinnowingFps, matchesByDoc, meta);
+    const evidenceReport = normalizeEvidenceVerdict(
+      buildProjectReport(studentWinnowingFps, matchesByDoc, meta),
+      finalPayload
+    );
 
     logger.info('plagiarism_scan_completed', {
       correlationId,
@@ -592,7 +633,10 @@ router.get('/report/:submissionId', async (req, res) => {
         const meta = await getDocumentsMetadata(docIds, tenantId);
 
         // 3. Build the project-level evidence report
-        const evidenceReport = buildProjectReport(submission.studentFingerprints, matchesByDoc, meta);
+        const evidenceReport = normalizeEvidenceVerdict(
+            buildProjectReport(submission.studentFingerprints, matchesByDoc, meta),
+            submission.analysisResults
+        );
         const humanOverrides = await listReviewOverrides(submissionId, tenantId);
         const ignoredSources = new Set(
             humanOverrides
