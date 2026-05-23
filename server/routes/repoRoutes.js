@@ -24,10 +24,90 @@ const headers = env.GITHUB_TOKEN
 export { parseGithubUrl };
 
 const MODULE_VERSIONS = {
-  commits:     2,
+  commits:     3,
   llmSummary:  1,
-  originality: 5,
+  originality: 6,
 };
+
+function clampScore(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function computeFallbackIntegrityScore(fileMeta = {}) {
+  const additions = Math.max(0, Number(fileMeta.additions) || 0);
+  const deletions = Math.max(0, Number(fileMeta.deletions) || 0);
+  const totalChanges = Math.max(additions + deletions, Number(fileMeta.changes) || 0);
+
+  if (totalChanges <= 4) return 0.92;
+  if (totalChanges <= 12) return 0.82;
+  if (totalChanges <= 30) return 0.68;
+  if (totalChanges <= 80) return 0.52;
+  return 0.35;
+}
+
+function wrapJavaScriptFragment(code) {
+  const source = code || '';
+  if (!source.trim()) return source;
+  if (/^\s*(import|export)\b/m.test(source)) return source;
+
+  const openCurly = (source.match(/\{/g) || []).length;
+  const closeCurly = (source.match(/\}/g) || []).length;
+  const missingCurly = Math.max(0, openCurly - closeCurly);
+  const padding = missingCurly > 0 ? `\n${'}\n'.repeat(missingCurly)}` : '';
+
+  return `async function __gitpulse_fragment__() {\n${source}\n}${padding}`;
+}
+
+function maybeRecoverFragmentTree(parseSource, langKey) {
+  const initialTree = parser.parse(parseSource);
+  const initialHealth = getAstParserHealth(initialTree.rootNode);
+
+  if (!initialHealth.isSeverelyCorrupt || !['javascript', 'typescript', 'tsx'].includes(langKey)) {
+    return { tree: initialTree, health: initialHealth, recovered: false };
+  }
+
+  const wrappedTree = parser.parse(wrapJavaScriptFragment(parseSource));
+  const wrappedHealth = getAstParserHealth(wrappedTree.rootNode);
+
+  if (wrappedHealth.errorRatio < initialHealth.errorRatio) {
+    return { tree: wrappedTree, health: wrappedHealth, recovered: true };
+  }
+
+  return { tree: initialTree, health: initialHealth, recovered: false };
+}
+
+function computeIntegrityScore({ oldNodes, newNodes, oldHealth, newHealth, fileMeta = {} }) {
+  const maxNodes = Math.max(oldNodes, newNodes, 1);
+  const delta = Math.abs(newNodes - oldNodes);
+  const positiveGrowth = Math.max(0, newNodes - oldNodes);
+  const negativeGrowth = Math.max(0, oldNodes - newNodes);
+  const growthRatio = positiveGrowth / maxNodes;
+  const shrinkRatio = oldNodes > 0 ? negativeGrowth / oldNodes : 0;
+  const sizeFactor = Math.min(1, maxNodes / 120);
+  const smallChange = maxNodes < 30 && delta <= 8;
+
+  let score = 1 - (delta / maxNodes);
+  score -= growthRatio * 0.35 * sizeFactor;
+  score -= shrinkRatio * 0.12 * sizeFactor;
+
+  if (smallChange) {
+    score = Math.max(score, 0.85);
+  } else if (maxNodes < 60 && delta <= 18) {
+    score = Math.max(score, 0.7);
+  }
+
+  const additions = Math.max(0, Number(fileMeta.additions) || 0);
+  const deletions = Math.max(0, Number(fileMeta.deletions) || 0);
+  if (deletions > 0 && additions <= 2 && newNodes <= oldNodes) {
+    score = Math.max(score, 0.72);
+  }
+
+  if (oldHealth.hasErrors || newHealth.hasErrors) {
+    score *= 0.92;
+  }
+
+  return clampScore(score);
+}
 
 function extractWinnowingForFiles(fingerprints) {
   const studentWinnowingFps = [];
@@ -142,7 +222,8 @@ router.post('/link-repo', async (req, res) => {
             oldErrorRatio: 0,
             newErrorRatio: 0,
             oldErrorNodes: 0,
-            newErrorNodes: 0
+            newErrorNodes: 0,
+            usedFragmentRecovery: false
           };
 
           if (parser && rawHunk && sourceFile) {
@@ -151,21 +232,23 @@ router.post('/link-repo', async (req, res) => {
             if (targetGrammar) {
               parser.setLanguage(targetGrammar);
               const { oldCode, newCode } = splitDiff(rawHunk);
-              const treeOld = parser.parse(oldCode);
-              const treeNew = parser.parse(newCode);
-
-              const oldHealth = getAstParserHealth(treeOld.rootNode);
-              const newHealth = getAstParserHealth(treeNew.rootNode);
+              const oldParse = maybeRecoverFragmentTree(oldCode, extensionMap[fileExt]);
+              const newParse = maybeRecoverFragmentTree(newCode, extensionMap[fileExt]);
+              const treeOld = oldParse.tree;
+              const treeNew = newParse.tree;
+              const oldHealth = oldParse.health;
+              const newHealth = newParse.health;
               n1 = countSemanticNodes(treeOld.rootNode);
               n2 = countSemanticNodes(treeNew.rootNode);
               d  = Math.abs(n2 - n1);
               parserDiagnostics = {
-                status: 'clean',
+                status: oldParse.recovered || newParse.recovered ? 'fragment_recovered' : 'clean',
                 fileName: sourceFile.filename,
                 oldErrorRatio: Number(oldHealth.errorRatio.toFixed(4)),
                 newErrorRatio: Number(newHealth.errorRatio.toFixed(4)),
                 oldErrorNodes: oldHealth.errorNodes,
-                newErrorNodes: newHealth.errorNodes
+                newErrorNodes: newHealth.errorNodes,
+                usedFragmentRecovery: oldParse.recovered || newParse.recovered
               };
 
               if (oldHealth.isSeverelyCorrupt || newHealth.isSeverelyCorrupt) {
@@ -179,11 +262,17 @@ router.post('/link-repo', async (req, res) => {
                     oldErrorNodes: oldHealth.errorNodes,
                     newErrorNodes: newHealth.errorNodes
                   });
-                  r = 0;
-                  parserDiagnostics.status = 'severe_parse_failure';
-                  cstStr = `(ERROR) Severe parser corruption detected. Old error ratio: ${parserDiagnostics.oldErrorRatio}; New error ratio: ${parserDiagnostics.newErrorRatio}. Structural score downgraded instead of silently reporting zero evidence.`;
+                  r = computeFallbackIntegrityScore(sourceFile);
+                  parserDiagnostics.status = 'degraded_line_fallback';
+                  cstStr = `Parser degradation detected. Structural diff fragment could not be parsed cleanly, so the score fell back to line-change heuristics instead of a zeroed AST score. Old error ratio: ${parserDiagnostics.oldErrorRatio}; New error ratio: ${parserDiagnostics.newErrorRatio}.`;
               } else {
-                  r  = n2 > 0 ? Math.max(0, 1 - (d / n2)) : 1;
+                  r = computeIntegrityScore({
+                    oldNodes: n1,
+                    newNodes: n2,
+                    oldHealth,
+                    newHealth,
+                    fileMeta: sourceFile
+                  });
                   cstStr = sanitizeCst(treeNew.rootNode);
                   if (oldHealth.hasErrors || newHealth.hasErrors) {
                     parserDiagnostics.status = 'partial_parse_used';
