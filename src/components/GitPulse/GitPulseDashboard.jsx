@@ -151,6 +151,16 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                 </span>
               </div>
             </div>
+            
+            {data.semanticSubstitutionViolation && (
+              <div className="semantic-substitution-violation-alert">
+                <ShieldAlert size={20} className="violation-icon" />
+                <div className="violation-text">
+                  <span className="violation-title">Semantic Substitution Violation</span>
+                  <span className="violation-desc">{data.violationReason}</span>
+                </div>
+              </div>
+            )}
 
             <div className="matrix-container">
               {data.matrix.map((item, index) => {
