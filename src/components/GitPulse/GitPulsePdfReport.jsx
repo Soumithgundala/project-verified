@@ -35,6 +35,7 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
 
   const buildClassificationExplanation = () => {
     if (!evidenceReport) return null;
+    if (zeroMatchState) return null;
     const dominant = evidenceReport.sources?.[0];
     const largestSegment = dominant?.topSegments?.reduce((max, segment) => {
       const count = segment.fingerprintCount || 0;
@@ -43,10 +44,6 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
 
     if (evidenceReport.plagiarismType === 'BOILERPLATE_HEAVY') {
       return 'Low-trust boilerplate matches were suppressed from primary classification.';
-    }
-
-    if (zeroMatchState) {
-      return `Evidence gate status: ${evidenceGateLabel}. ${evidenceReport.rejectionReason}`;
     }
 
     if (evidenceReport.plagiarismType === 'LOW_CONFIDENCE') {
@@ -159,7 +156,7 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
           <div className="pdf-evidence-summary">
             <div>
               <p className="pdf-stat-label">Classification</p>
-              <p className="pdf-evidence-classification">{evidenceReport.plagiarismType === 'NO_MATCH' ? 'NO_MATCH' : evidenceReport.plagiarismType}</p>
+              <p className="pdf-evidence-classification">{evidenceReport.plagiarismType === 'CLEAN_ORIGINAL_CODE' ? 'CLEAN_ORIGINAL_CODE' : evidenceReport.plagiarismType}</p>
             </div>
             <div>
               <p className="pdf-stat-label">Containment</p>
@@ -180,7 +177,9 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
               </p>
             )}
           </div>
-          <p className="pdf-evidence-explanation">{buildClassificationExplanation()}</p>
+          {buildClassificationExplanation() && (
+            <p className="pdf-evidence-explanation">{buildClassificationExplanation()}</p>
+          )}
 
           {evidenceReport.sources?.length > 0 ? (
             evidenceReport.sources.map((source, sourceIndex) => (
@@ -238,7 +237,9 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
                 {!zeroMatchState && evidenceReport.rejectionReason ? (
                   <strong>{evidenceReport.rejectionReason}</strong>
                 ) : (
-                  buildEvidenceHeadline() || "No qualifying evidence receipts passed the confidence threshold."
+                  zeroMatchState
+                    ? 'No evidence receipts were generated for this submission.'
+                    : "No qualifying evidence receipts passed the confidence threshold."
                 )}
                 {(hasParseFailure || hasFallbackFailure) ? ' Analysis diagnostics above indicate this may be due to parser or fallback degradation.' : ''}
               </p>

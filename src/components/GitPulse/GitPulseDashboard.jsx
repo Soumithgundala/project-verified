@@ -435,7 +435,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                   <ShieldAlert size={20} style={{ color: '#4f46e5' }} /> Forensic Evidence Receipts
                 </h3>
                 <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem' }}>
-                  <div><span style={{ color: '#64748b' }}>Classification:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.plagiarismType === 'NO_MATCH' ? 'NO_MATCH' : data.evidenceReport.plagiarismType}</span></div>
+                  <div><span style={{ color: '#64748b' }}>Classification:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.plagiarismType === 'CLEAN_ORIGINAL_CODE' ? 'CLEAN_ORIGINAL_CODE' : data.evidenceReport.plagiarismType}</span></div>
                   <div><span style={{ color: '#64748b' }}>Containment:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.projectContainment}%</span></div>
                   <div><span style={{ color: '#64748b' }}>Dominance:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.dominanceScore}%</span></div>
                 </div>
@@ -449,7 +449,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                   {zeroMatchState
                     ? (hasParseDegradation
                       ? 'No receipts were produced, and the parser reported degradation. This result is inconclusive rather than a clean no-match.'
-                      : 'No receipts were produced. The analyzed files did not yield any overlapping structural fingerprints against the current corpus.')
+                      : 'No matching fingerprints were found, and the origin check also returned a clean no-match.')
                     : (data.evidenceReport.rejectionReason || 'Some evidence was found, but the receipts did not clear the final classification gates.')}
                 </p>
                 {parserDiagnostics && (
@@ -514,9 +514,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                     <strong>{data.evidenceReport.rejectionReason}</strong>
                   ) : (
                     zeroMatchState
-                      ? (hasParseDegradation
-                        ? 'No receipts were produced, and the parser reported degradation. This result is inconclusive rather than a clean no-match.'
-                        : 'No matching fingerprints were found, and the origin check also returned a clean no-match.')
+                      ? 'No evidence receipts were generated for this submission.'
                       : "No qualifying evidence receipts passed the confidence threshold."
                   )}
                   {minimumEvidenceThreshold > 0 && (
