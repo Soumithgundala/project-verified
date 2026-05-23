@@ -738,3 +738,16 @@
 .pdf-appendix-list li {
   margin-bottom: 4px;
 }
+
+/* PDF Semantic Substitution Warning Banner */
+.pdf-align-warning-banner {
+  padding: 15px;
+  background-color: #fff1f2;
+  border: 1px dashed #fecdd3;
+  border-left: 6px solid #e11d48;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  color: #9f1239;
+  font-size: 13px;
+  line-height: 1.5;
+}

@@ -603,3 +603,42 @@
     max-height: 300px;
     overflow-y: auto;
 }
+
+/* Semantic Substitution Violation Alert */
+.semantic-substitution-violation-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1.25rem;
+    background: rgba(239, 68, 68, 0.05);
+    border: 1px dashed rgba(239, 68, 68, 0.3);
+    border-radius: 0.75rem;
+    margin-bottom: 1.25rem;
+    color: #9f1239;
+}
+
+.violation-icon {
+    color: #e11d48;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.violation-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.violation-title {
+    font-weight: 800;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #e11d48;
+}
+
+.violation-desc {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: #4c0519;
+}
