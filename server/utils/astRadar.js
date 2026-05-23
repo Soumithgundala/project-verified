@@ -376,11 +376,17 @@ export async function huntGlobalClones(anchorString, owner, repo, headers, first
 // VERIFICATION: Cross-reference LLM-extracted claims against the actual repo
 // =================================================================
 export async function verifyTechStack(owner, repo, latestSha, claimsArray, headers) {
-    if (!claimsArray || claimsArray.length === 0) return [];
+    const defaultResponse = {
+        matrix: [],
+        semanticSubstitutionViolation: false,
+        violationReason: ""
+    };
+    if (!claimsArray || claimsArray.length === 0) return defaultResponse;
     const lowerClaims = claimsArray.map(c => c.toLowerCase());
-    const results = lowerClaims.map(claim => ({ name: claim, status: 'Missing in Code' }));
+    const matrix = lowerClaims.map(claim => ({ name: claim, status: 'Missing in Code' }));
 
     let combinedConfigText = "";
+    let fingerprints = [];
 
     try {
         // Try to fetch package.json
@@ -405,7 +411,7 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
         const superNormalizedConfig = combinedConfigText.replace(/[-_ ]/g, '');
 
         // 1. Dependency Check
-        results.forEach(item => {
+        matrix.forEach(item => {
             // Strip the same characters from the LLM's claim
             const superItem = item.name.replace(/[-_ ]/g, '');
 
@@ -422,11 +428,11 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
         });
 
         // 2. API / Logic Deep Scan Fallback (for claims not found in config)
-        const unverified = results.filter(r => r.status === 'Missing in Code');
+        const unverified = matrix.filter(r => r.status === 'Missing in Code');
         if (unverified.length > 0) {
             try {
                 // Get the heaviest logic file's rawCode to check for API keys or libraries loaded dynamically
-                const fingerprints = await extractProjectFingerprints(owner, repo, latestSha, headers, {
+                fingerprints = await extractProjectFingerprints(owner, repo, latestSha, headers, {
                     candidateLimit: 5,
                     limit: 5,
                     lightweight: true
@@ -461,5 +467,41 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
         console.error("Verification Math Failed:", err.message);
     }
 
-    return results;
+    // Logic Gate for Semantic Substitution Violation:
+    // If the document claims a custom machine learning model (e.g., PyTorch, TensorFlow),
+    // but the AST imports 3rd party APIs (e.g., openai, anthropic), flag this.
+    let semanticSubstitutionViolation = false;
+    let violationReason = "";
+
+    const superNormalizedConfig = combinedConfigText.replace(/[-_ ]/g, '');
+    const lowerCode = fingerprints ? fingerprints.map(fp => fp.rawCode).join('\n').toLowerCase() : "";
+
+    const hasCustomMLClaim = claimsArray.some(c => {
+        const norm = c.toLowerCase().replace(/[-_ ]/g, '');
+        return ['pytorch', 'tensorflow', 'keras', 'jax', 'resnet', 'swintransformer', 'resnet50', 'swin'].includes(norm);
+    });
+
+    const usesThirdPartyAPI = 
+        superNormalizedConfig.includes('openai') || 
+        superNormalizedConfig.includes('anthropic') ||
+        lowerCode.includes('import openai') ||
+        lowerCode.includes('from openai') ||
+        lowerCode.includes('require(\'openai\')') ||
+        lowerCode.includes('require("openai")') ||
+        lowerCode.includes('import anthropic') ||
+        lowerCode.includes('from anthropic') ||
+        lowerCode.includes('require(\'anthropic\')') ||
+        lowerCode.includes('require("anthropic")');
+
+    if (hasCustomMLClaim && usesThirdPartyAPI) {
+        semanticSubstitutionViolation = true;
+        violationReason = "Semantic Substitution Violation: Document claims custom machine learning models (e.g., PyTorch, TensorFlow, ResNet, Swin-Transformer), but codebase imports 3rd-party APIs (e.g., OpenAI, Anthropic) as an architectural shortcut.";
+    }
+
+    return {
+        matrix,
+        semanticSubstitutionViolation,
+        violationReason
+    };
 }
+
