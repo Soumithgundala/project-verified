@@ -430,6 +430,12 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
         <div className="pdf-section no-break">
           <h3 className="pdf-section-title">Document Alignment Matrix</h3>
 
+          {data.semanticSubstitutionViolation && (
+            <div className="pdf-align-warning-banner">
+              <strong>⚠ Semantic Substitution Violation:</strong> {data.violationReason}
+            </div>
+          )}
+
           {/* Score banner */}
           <div className="pdf-align-banner">
             <div className="pdf-align-score-block">
