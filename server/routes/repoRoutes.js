@@ -131,15 +131,20 @@ function normalizeEvidenceVerdict(evidenceReport, analysisPayload = null) {
   const parserStatus = analysisPayload?.analysis?.parserDiagnostics?.status || '';
   const parserDegraded = [
     'severe_parse_failure',
-    'degraded_line_fallback',
-    'fragment_recovered',
-    'partial_parse_used'
+    'degraded_line_fallback'
   ].includes(parserStatus) || String(analysisPayload?.analysis?.cst || '').includes('Parser degradation detected');
 
-  if (evidenceReport.totalMatchedFingerprints === 0 && originalityStatus === 'Original' && !parserDegraded) {
+  if (evidenceReport.plagiarismType === 'CLEAN_ORIGINAL_CODE' && parserDegraded) {
     return {
       ...evidenceReport,
-      plagiarismType: 'NO_MATCH',
+      plagiarismType: 'LOW_CONFIDENCE',
+      rejectionReason: 'No matching fingerprints were found, but parser degradation was detected during analysis. Treat this result as inconclusive rather than a verified clean no-match.'
+    };
+  }
+
+  if (evidenceReport.plagiarismType === 'CLEAN_ORIGINAL_CODE' && originalityStatus === 'Original' && !parserDegraded) {
+    return {
+      ...evidenceReport,
       rejectionReason: 'No matching fingerprints were found, and the origin check also returned a clean no-match. This repository currently has no structural overlap evidence in the indexed corpus.'
     };
   }
@@ -323,6 +328,23 @@ router.post('/link-repo', async (req, res) => {
                       newErrorRatio: Number(newHealth.errorRatio.toFixed(4))
                     });
                   }
+              }
+
+              const isNewCodeFile = sourceFile.status === 'added' || (n1 === 0 && n2 > 0 && (sourceFile.deletions || 0) === 0);
+              if (isNewCodeFile) {
+                const additions = Math.max(0, Number(sourceFile.additions) || 0);
+                if (additions <= 12) {
+                  r = Math.max(r, 0.92);
+                } else if (additions <= 30) {
+                  r = Math.max(r, 0.84);
+                } else if (additions <= 80) {
+                  r = Math.max(r, 0.72);
+                } else {
+                  r = Math.max(r, 0.58);
+                }
+                parserDiagnostics.status = parserDiagnostics.status === 'clean'
+                  ? 'new_file_addition'
+                  : `${parserDiagnostics.status}_new_file_addition`;
               }
             }
           }
