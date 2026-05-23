@@ -178,11 +178,14 @@ export function generateWinnowingFingerprints(rootNode, k = 15, w = 4, fileName 
 
     // 3. Winnowing Window (Tie-breaker: pick the right-most minimum)
     const fingerprints = new Map(); // Use a Map to ensure unique hashes while keeping object data
+    const effectiveWindow = Math.min(w, kGrams.length);
 
-    for (let i = 0; i <= kGrams.length - w; i++) {
+    if (effectiveWindow === 0) return [];
+
+    for (let i = 0; i <= kGrams.length - effectiveWindow; i++) {
         let minGram = kGrams[i];
 
-        for (let j = i + 1; j < i + w; j++) {
+        for (let j = i + 1; j < i + effectiveWindow; j++) {
             // Tie-breaker: <= ensures we pick the later occurrence in the window
             if (kGrams[j].hash <= minGram.hash) {
                 minGram = kGrams[j];
@@ -504,4 +507,3 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
         violationReason
     };
 }
-
