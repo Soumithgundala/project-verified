@@ -84,15 +84,20 @@ async function analyzeRepositoryAST(repositoryName, astData) {
 
     const safeCode = stripComments(astData);
     const codeSnippet = safeCode.substring(0, 8000);
-    const prompt = `You are an expert code analyzer. Analyze the following AST/code snippet from '${repositoryName}'. Extract the core logic fingerprint and provide a concise summary.\n\nCode/AST:\n${codeSnippet}`;
+    const prompt = `You are an expert code analyzer. Analyze the following AST/code snippet from '${repositoryName}'. Extract the core logic fingerprint and provide a concise summary.
+Specifically identify if there are any "Architectural Substitutions"—for example, if the project claims or implies custom Machine Learning/Deep Learning models (like ResNet, Swin-Transformer, PyTorch, TensorFlow) but the code actually delegates to 3rd-party APIs (like OpenAI, Anthropic, Gemini, Groq, etc.) as a shortcut instead of implementing the claimed custom architectures. If so, clearly flag this architectural substitution in the summary.
+
+Code/AST:
+${codeSnippet}`;
     // console.log(`🧠 Extracting Fingerprint and generating LLM Summary for ${repositoryName}...`);
     return await generateSummary(prompt);
 }
 
 async function normalizeTechClaims(textSlice) {
-    const prompt = `You are a strict data normalizer. Read this text slice from an academic project report. Extract the core software, frameworks, databases, and APIs the student claims to have used.
-You MUST normalize the names to their standard package-manager formats (e.g., change 'React.js' to 'react', 'PostgreSQL' to 'pg' or 'postgres', 'NodeJS' to 'node').
-Return ONLY a flat JSON array of lowercase strings. Example: ['react', 'node', 'flask', 'leaflet']. No markdown, no introduction, and no extra text.
+    const prompt = `You are a strict data normalizer. Read this text slice from an academic project report. Extract the core software, frameworks, databases, APIs, and machine learning architectures/models the student claims to have used (e.g., resnet50, swin-transformer, pytorch, tensorflow, openai, anthropic).
+You MUST normalize the names to their standard package-manager formats or lowercase canonical names (e.g., change 'React.js' to 'react', 'PostgreSQL' to 'pg' or 'postgres', 'NodeJS' to 'node', 'ResNet50' to 'resnet50', 'Swin-Transformers' to 'swin-transformer').
+In addition, be extremely vigilant for any "Architectural Substitutions" where the student claims a custom model or local architecture but might be using third-party APIs instead. Extract both the claimed custom model/framework and any mentioned third-party APIs.
+Return ONLY a flat JSON array of lowercase strings. Example: ['react', 'node', 'pytorch', 'resnet50', 'openai']. No markdown, no introduction, and no extra text.
 
 Text Slice:
 ${textSlice}`;
