@@ -7,6 +7,14 @@ const parsers = [
         url: 'https://github.com/tree-sitter/tree-sitter-javascript/releases/latest/download/tree-sitter-javascript.wasm'
     },
     {
+        name: 'tree-sitter-typescript.wasm',
+        url: 'https://github.com/tree-sitter/tree-sitter-typescript/releases/latest/download/tree-sitter-typescript.wasm'
+    },
+    {
+        name: 'tree-sitter-tsx.wasm',
+        url: 'https://github.com/tree-sitter/tree-sitter-typescript/releases/latest/download/tree-sitter-tsx.wasm'
+    },
+    {
         name: 'tree-sitter-python.wasm',
         url: 'https://github.com/tree-sitter/tree-sitter-python/releases/latest/download/tree-sitter-python.wasm'
     },
