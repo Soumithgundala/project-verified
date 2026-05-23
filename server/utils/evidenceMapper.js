@@ -184,6 +184,7 @@ function validateSegmentMapping(segment) {
 }
 
 const MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION = 25;
+const MIN_MATCHED_FINGERPRINTS_FLOOR = 6;
 const MIN_RELATIVE_MATCH = 0.08;   // must be >= 8% of total student FPs
 const MIN_LARGEST_SEGMENT_FPS = 8; // must have at least one coherent block
 
@@ -210,15 +211,34 @@ const SOURCE_TRUST_WEIGHTS = {
     boilerplate: 0.1
 };
 
+function getMinimumMatchedFingerprints(totalFingerprints) {
+    if (!Number.isFinite(totalFingerprints) || totalFingerprints <= 0) {
+        return MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION;
+    }
+
+    return Math.max(
+        MIN_MATCHED_FINGERPRINTS_FLOOR,
+        Math.min(
+            MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION,
+            Math.ceil(totalFingerprints * 0.1)
+        )
+    );
+}
+
 /**
  * Multi-dimensional Plagiarism Classification with strict priority ordering.
  * Requires BOTH absolute count AND relative ratio to trigger any flag.
  * Also requires at least one coherent block of >= 8 fingerprints.
  */
 function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints, totalMatchedFingerprints, largestSegmentFpCount) {
+    const minimumMatchedFingerprints = getMinimumMatchedFingerprints(totalFingerprints);
+
     // Gate 1: Absolute minimum count
-    if (totalMatchedFingerprints < MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION) {
-        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Absolute Gate: Only ${totalMatchedFingerprints} matching fingerprints found across the project (minimum required: ${MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION}). Evidence is too sparse to definitively prove plagiarism.` };
+    if (totalMatchedFingerprints <= 0) {
+        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Absolute Gate: No matching fingerprints were found across the analyzed project files. This usually means the parser never produced enough usable structural fingerprints, or the compared corpus has no overlapping logic.` };
+    }
+    if (totalMatchedFingerprints < minimumMatchedFingerprints) {
+        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Absolute Gate: Only ${totalMatchedFingerprints} matching fingerprints found across the project (minimum required: ${minimumMatchedFingerprints} based on project size). Evidence is too sparse to definitively prove plagiarism.` };
     }
 
     // Gate 2: Relative minimum ratio (8% of total FPs must match)
@@ -260,7 +280,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         dominanceScore: 0,
         plagiarismType: 'NONE',
         totalMatchedFingerprints: 0,
-        minimumEvidenceThreshold: MIN_MATCHED_FINGERPRINTS_FOR_CONFIDENT_CLASSIFICATION,
+        minimumEvidenceThreshold: 0,
         calibration: CALIBRATION,
         sources: [],
         suppressedSources: []
@@ -268,6 +288,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
 
     if (!studentFingerprints || studentFingerprints.length === 0) return result;
     const totalStudentFingerprints = studentFingerprints.length;
+    result.minimumEvidenceThreshold = getMinimumMatchedFingerprints(totalStudentFingerprints);
 
     let candidateSources = [];
     let totalRankedContainment = 0;
