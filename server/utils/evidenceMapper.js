@@ -24,9 +24,9 @@ function mergeSegments(matches) {
         if (!matchesByFile[file]) matchesByFile[file] = [];
         matchesByFile[file].push(m);
     }
-    
+
     const allSegments = [];
-    
+
     for (const [file, fileMatches] of Object.entries(matchesByFile)) {
         const sortedMatches = [...fileMatches].sort((a, b) => a.studentStart - b.studentStart);
 
@@ -106,7 +106,7 @@ function mergeSegments(matches) {
 function computeConfidence(segment, studentFingerprints) {
     const length = segment.studentEnd - segment.studentStart;
     if (length <= 0) return { score: 0, breakdown: { density: 0, length: 0, uniqueness: 0, coherence: 0 } };
-    
+
     const expectedFps = Math.max(1, length / 50);
     const density = Math.min(1, segment.fingerprintCount / expectedFps);
 
@@ -119,8 +119,8 @@ function computeConfidence(segment, studentFingerprints) {
 
     let possibleFpsInRange = 0;
     for (const fp of studentFingerprints) {
-        if (fp.fileName === segment.studentFileName && 
-            fp.startPos >= segment.studentStart && 
+        if (fp.fileName === segment.studentFileName &&
+            fp.startPos >= segment.studentStart &&
             fp.endPos <= segment.studentEnd) {
             possibleFpsInRange++;
         }
@@ -155,8 +155,8 @@ function calibrateConfidence(score, uniqueness) {
  * Filters out noise and random collisions.
  */
 function filterNoise(segments) {
-    return segments.filter(seg => 
-        seg.fingerprintCount >= 3 && 
+    return segments.filter(seg =>
+        seg.fingerprintCount >= 3 &&
         (seg.studentEnd - seg.studentStart) > 30
     );
 }
@@ -233,12 +233,17 @@ function getMinimumMatchedFingerprints(totalFingerprints) {
 function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalSegments, totalFingerprints, totalMatchedFingerprints, largestSegmentFpCount) {
     const minimumMatchedFingerprints = getMinimumMatchedFingerprints(totalFingerprints);
 
-    // Gate 1: Absolute minimum count
-    if (totalMatchedFingerprints <= 0) {
-        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Absolute Gate: No matching fingerprints were found across the analyzed project files. This usually means the parser never produced enough usable structural fingerprints, or the compared corpus has no overlapping logic.` };
+    // Gate 0: A complete absence of overlaps is a clean true negative, not a weak positive.
+    if (totalMatchedFingerprints === 0) {
+        return {
+            type: 'CLEAN_ORIGINAL_CODE',
+            reason: 'No matching fingerprints were found across the analyzed project files.'
+        };
     }
+
+    // Gate 1: Absolute minimum count
     if (totalMatchedFingerprints < minimumMatchedFingerprints) {
-        return { type: 'LOW_CONFIDENCE', reason: `Rejected by Absolute Gate: Only ${totalMatchedFingerprints} matching fingerprints found across the project (minimum required: ${minimumMatchedFingerprints} based on project size). Evidence is too sparse to definitively prove plagiarism.` };
+        return { type: 'ORIGINAL', reason: `Rejected by Absolute Gate: Only ${totalMatchedFingerprints} matching fingerprints found across the project (minimum required: ${minimumMatchedFingerprints} based on project size). Evidence is too sparse to definitively prove plagiarism.` };
     }
 
     // Gate 2: Relative minimum ratio (8% of total FPs must match)
@@ -254,7 +259,7 @@ function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalS
 
     // 1. Full Clone Priority
     if (projectContainment > CALIBRATION.fullCloneContainment && dominance > CALIBRATION.fullCloneDominance) return { type: 'FULL_CLONE' };
-    
+
     // 2. Mosaic Check
     const segmentRatio = totalFingerprints > 0 ? (totalSegments / totalFingerprints) : 0;
     if (
@@ -267,7 +272,7 @@ function classifyPlagiarism(projectContainment, dominance, uniqueSources, totalS
 
     // 3. Partial Clone Check
     if (projectContainment > CALIBRATION.partialCloneContainment) return { type: 'PARTIAL_CLONE' };
-    
+
     return { type: 'LOW_CONFIDENCE', reason: 'Rejected by Confidence Thresholds: Containment or dominance signals did not meet the required thresholds for classification.' };
 }
 
@@ -321,13 +326,13 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         scoredSegments.sort((a, b) => b.confidence.score - a.confidence.score);
 
         // Calculate Project-Level Containment contribution for this source
-        const matchedFingerprintCount = matches.length; 
+        const matchedFingerprintCount = matches.length;
         const containmentScore = matchedFingerprintCount / totalStudentFingerprints;
 
         // Apply Source Reputation Weighting + False Positive Guardrail
         let sourceOrigin = documentsMetadata[docId]?.sourceOrigin || "unknown";
         const trustWeight = SOURCE_TRUST_WEIGHTS[sourceOrigin] ?? SOURCE_TRUST_WEIGHTS.unknown;
-        
+
         let effectiveContainment = containmentScore * trustWeight;
 
         candidateSources.push({
@@ -338,14 +343,14 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
             segments: scoredSegments,
             rawSegments: segments // keep raw for coherence gate (fingerprintCount access)
         });
-        
+
         totalRankedContainment += effectiveContainment;
     }
 
     // Sort sources by effective containment
     candidateSources.sort((a, b) => b.containment - a.containment);
     const topSources = candidateSources.slice(0, 3);
-    
+
     // Project Aggregation
     let uniqueSourcesCount = 0;
     let totalSegmentsCount = 0;
@@ -355,7 +360,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         // Dominance
         const dominantSource = topSources[0];
         result.dominanceScore = totalRankedContainment > 0 ? parseFloat((dominantSource.containment / totalRankedContainment).toFixed(2)) : 0;
-        
+
         // Project Containment (union of top sources, simplified as sum of their containments due to disjoint matching usually, but capped at 1.0)
         let uniqueMatchedFingerprints = new Set();
         for (const source of topSources) {
@@ -383,10 +388,10 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         result.rejectionReason = 'Low-trust boilerplate matches were suppressed from primary classification.';
     } else {
         const classification = classifyPlagiarism(
-            result.projectContainment, 
-            result.dominanceScore, 
-            uniqueSourcesCount, 
-            totalSegmentsCount, 
+            result.projectContainment,
+            result.dominanceScore,
+            uniqueSourcesCount,
+            totalSegmentsCount,
             totalStudentFingerprints,
             result.totalMatchedFingerprints,
             largestSegmentFpCount
@@ -401,7 +406,7 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
     for (const source of topSources) {
         const topSegments = source.segments.slice(0, 5);
         const restSegments = source.segments.slice(5);
-        
+
         let avgConfidence = 0;
         if (restSegments.length > 0) {
             const sum = restSegments.reduce((acc, seg) => acc + seg.confidence.score, 0);
