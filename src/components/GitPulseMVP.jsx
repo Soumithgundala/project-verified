@@ -11,7 +11,7 @@ import GitPulseHelpModal from './GitPulse/GitPulseHelpModal';
 const inFlightAnalyses = new Map();
 
 // NEW: Added initialData and isModalView props
-const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, isModalView = false }) => {
+const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, isModalView = false, onDataChange = null }) => {
   const [loading, setLoading] = useState(!initialData);
   const [data, setData] = useState(initialData);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -74,6 +74,11 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
     };
     if (linkedUrl && !initialData) analyzeRepo();
   }, [linkedUrl, auditDocument, initialData]);
+
+  useEffect(() => {
+    if (!data || !onDataChange || isModalView) return;
+    onDataChange(data);
+  }, [data, onDataChange, isModalView]);
 
   const handleDownloadPDF = () => {
     setIsPrinting(true);
