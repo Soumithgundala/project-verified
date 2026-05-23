@@ -7,6 +7,7 @@ import { Link, Route, Routes } from 'react-router-dom';
 import QuarantinePage from './components/Admin/QuarantinePage';
 
 const APP_SESSION_KEY = 'gitpulse.activeSession';
+const APP_SESSION_VERSION = 2;
 
 function App() {
   const [repoLinked, setRepoLinked] = useState(false);
@@ -22,6 +23,10 @@ function App() {
       if (!savedSession) return;
 
       const parsed = JSON.parse(savedSession);
+      if ((parsed?.version ?? 1) !== APP_SESSION_VERSION) {
+        sessionStorage.removeItem(APP_SESSION_KEY);
+        return;
+      }
       if (!parsed?.repoUrl || !parsed?.analysisData) return;
 
       setRepoUrl(parsed.repoUrl);
@@ -38,6 +43,7 @@ function App() {
     if (!nextRepoUrl || !analysisData) return;
 
     sessionStorage.setItem(APP_SESSION_KEY, JSON.stringify({
+      version: APP_SESSION_VERSION,
       repoUrl: nextRepoUrl,
       analysisData,
       viewMode: nextViewMode

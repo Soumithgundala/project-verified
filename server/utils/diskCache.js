@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR  = join(__dirname, '..', '.cache');
 const CACHE_FILE = join(CACHE_DIR, 'repoCache.json');
+const CACHE_SCHEMA_VERSION = 2;
 
 class DiskCache {
     constructor() {
@@ -22,7 +23,15 @@ class DiskCache {
         if (existsSync(CACHE_FILE)) {
             try {
                 const raw = readFileSync(CACHE_FILE, 'utf-8');
-                this._data = JSON.parse(raw);
+                const parsed = JSON.parse(raw);
+                const storedVersion = parsed?.__meta?.schemaVersion ?? 1;
+                if (storedVersion !== CACHE_SCHEMA_VERSION) {
+                    console.log(`📦 [DiskCache] Cache schema changed (${storedVersion} -> ${CACHE_SCHEMA_VERSION}) — starting fresh.`);
+                    this._data = {};
+                    this._flush();
+                    return;
+                }
+                this._data = parsed?.entries ?? parsed;
                 const count = Object.keys(this._data).length;
                 console.log(`📦 [DiskCache] Loaded ${count} cached repo(s) from disk.`);
             } catch (err) {
@@ -70,7 +79,12 @@ class DiskCache {
     /** Synchronous write — keeps this simple and safe in Express request handlers */
     _flush() {
         try {
-            writeFileSync(CACHE_FILE, JSON.stringify(this._data, null, 2), 'utf-8');
+            writeFileSync(CACHE_FILE, JSON.stringify({
+                __meta: {
+                    schemaVersion: CACHE_SCHEMA_VERSION
+                },
+                entries: this._data
+            }, null, 2), 'utf-8');
         } catch (err) {
             console.error('❌ [DiskCache] Failed to write cache to disk:', err.message);
         }
