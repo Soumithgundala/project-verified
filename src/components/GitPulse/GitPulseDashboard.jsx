@@ -73,6 +73,17 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
 
   const visibleMatches = (data.intelligence.globalOriginality?.matches || [])
     .filter((url) => !overrideState.ignoredSources.has(url));
+  const parserDiagnostics = data.analysis?.parserDiagnostics;
+  const hasParseDegradation = parserDiagnostics?.status === 'severe_parse_failure' ||
+    parserDiagnostics?.status === 'degraded_line_fallback' ||
+    parserDiagnostics?.status === 'fragment_recovered' ||
+    data.analysis?.cst?.includes('Parser degradation detected');
+  const totalMatchedFingerprints = data.evidenceReport?.totalMatchedFingerprints || 0;
+  const minimumEvidenceThreshold = data.evidenceReport?.minimumEvidenceThreshold || 0;
+  const evidenceGateText = minimumEvidenceThreshold > 0
+    ? `${totalMatchedFingerprints} / ${minimumEvidenceThreshold} fingerprints`
+    : `${totalMatchedFingerprints} fingerprints`;
+  const zeroMatchState = totalMatchedFingerprints === 0;
 
   return (
     <div className={`report-container ${isModalView ? 'modal-view' : ''}`}>
@@ -429,6 +440,25 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                   <div><span style={{ color: '#64748b' }}>Dominance:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.dominanceScore}%</span></div>
                 </div>
               </div>
+              <div style={{ padding: '0.875rem 1rem', borderRadius: '0.75rem', background: hasParseDegradation ? '#fff7ed' : '#f8fafc', border: `1px solid ${hasParseDegradation ? '#fdba74' : '#e2e8f0'}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b' }}>Evidence Gate</span>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#0f172a' }}>{evidenceGateText}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: '#475569' }}>
+                  {zeroMatchState
+                    ? (hasParseDegradation
+                      ? 'No receipts were produced, and the parser reported degradation. This result is inconclusive rather than a clean no-match.'
+                      : 'No receipts were produced. The analyzed files did not yield any overlapping structural fingerprints against the current corpus.')
+                    : (data.evidenceReport.rejectionReason || 'Some evidence was found, but the receipts did not clear the final classification gates.')}
+                </p>
+                {parserDiagnostics && (
+                  <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                    Parser status: <strong>{parserDiagnostics.status}</strong>
+                    {parserDiagnostics.usedFragmentRecovery ? ' with fragment recovery.' : ''}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="scrollable" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
@@ -484,6 +514,11 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                     <strong>{data.evidenceReport.rejectionReason}</strong>
                   ) : (
                     "No qualifying evidence receipts passed the confidence threshold."
+                  )}
+                  {minimumEvidenceThreshold > 0 && (
+                    <p style={{ marginTop: '0.75rem', fontWeight: 500 }}>
+                      Evidence gate threshold: {evidenceGateText}
+                    </p>
                   )}
                 </div>
               )}
