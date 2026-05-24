@@ -110,7 +110,12 @@ router.post('/audit-document', handleDocumentUpload, async (req, res) => {
     if (!fetchedCommits?.length) throw new Error("No commits found in this repository.");
     const latestSha = fetchedCommits[0].sha;
 
-    const { matrix: verificationMatrix, semanticSubstitutionViolation, violationReason } = await verifyTechStack(owner, repo, latestSha, claimsArray, headers);
+    const {
+      matrix: verificationMatrix,
+      semanticSubstitutionViolation,
+      violationReason,
+      semanticSubstitutionProofs
+    } = await verifyTechStack(owner, repo, latestSha, claimsArray, headers);
 
     // Calculate score
     const verifiedCount = verificationMatrix.filter(c => c.status.startsWith('Verified')).length;
@@ -130,7 +135,8 @@ router.post('/audit-document', handleDocumentUpload, async (req, res) => {
       matrix: verificationMatrix,
       claimsDetected: claimsArray,
       semanticSubstitutionViolation,
-      violationReason
+      violationReason,
+      semanticSubstitutionProofs
     });
 
   } catch (err) {
