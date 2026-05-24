@@ -475,6 +475,45 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
             </div>
           )}
 
+          {data.semanticSubstitutionViolation && data.semanticSubstitutionProofs?.length > 0 && (
+            <div style={{ display: 'grid', gap: '10px', marginBottom: '16px' }}>
+              {data.semanticSubstitutionProofs.map((proof, index) => (
+                <div
+                  key={`${proof.fileName}-${proof.lineNumber}-${index}`}
+                  style={{
+                    border: '1px solid #fdba74',
+                    background: '#fff7ed',
+                    borderRadius: '10px',
+                    padding: '10px 12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#9a3412' }}>
+                      Shortcut Proof
+                    </span>
+                    <span style={{ fontSize: '10px', fontWeight: 600, color: '#9a3412' }}>
+                      {proof.provider} via {proof.evidenceType === 'dependency' ? 'dependency' : 'logic call'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#9a3412', marginBottom: '4px' }}>
+                    {proof.fileName}:{proof.lineNumber}
+                  </div>
+                  <pre style={{
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: '10px',
+                    lineHeight: 1.45,
+                    color: '#431407',
+                    fontFamily: 'Courier New, monospace'
+                  }}>
+                    {proof.excerpt}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Score banner */}
           <div className="pdf-align-banner">
             <div className="pdf-align-score-block">

@@ -173,6 +173,45 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
               </div>
             )}
 
+            {data.semanticSubstitutionViolation && data.semanticSubstitutionProofs?.length > 0 && (
+              <div style={{ marginBottom: '1rem', display: 'grid', gap: '0.75rem' }}>
+                {data.semanticSubstitutionProofs.map((proof, index) => (
+                  <div
+                    key={`${proof.fileName}-${proof.lineNumber}-${index}`}
+                    style={{
+                      border: '1px solid #fed7aa',
+                      backgroundColor: '#fff7ed',
+                      borderRadius: '0.875rem',
+                      padding: '0.9rem 1rem'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.45rem' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#9a3412', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Shortcut Proof
+                      </span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#7c2d12' }}>
+                        {proof.provider} via {proof.evidenceType === 'dependency' ? 'dependency' : 'logic call'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#7c2d12', marginBottom: '0.4rem' }}>
+                      {proof.fileName}:{proof.lineNumber}
+                    </div>
+                    <pre style={{
+                      margin: 0,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontSize: '0.8rem',
+                      lineHeight: 1.5,
+                      color: '#431407',
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+                    }}>
+                      {proof.excerpt}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="matrix-container">
               {data.matrix.map((item, index) => {
                 const isVerified = item.status.includes('Verified');
