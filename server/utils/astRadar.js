@@ -382,7 +382,8 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
     const defaultResponse = {
         matrix: [],
         semanticSubstitutionViolation: false,
-        violationReason: ""
+        violationReason: "",
+        semanticSubstitutionProofs: []
     };
     if (!claimsArray || claimsArray.length === 0) return defaultResponse;
     const lowerClaims = claimsArray.map(c => c.toLowerCase());
@@ -390,24 +391,62 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
 
     let combinedConfigText = "";
     let fingerprints = [];
+    const evidenceFiles = [];
+
+    function addEvidenceFile(fileName, content) {
+        if (!content) return;
+        evidenceFiles.push({ fileName, content });
+    }
+
+    function findProofsInText(content, fileName, provider, patterns) {
+        const proofs = [];
+        const lines = String(content || '').split('\n');
+
+        lines.forEach((line, index) => {
+            const lowered = line.toLowerCase();
+            for (const pattern of patterns) {
+                if (lowered.includes(pattern)) {
+                    proofs.push({
+                        provider,
+                        fileName,
+                        lineNumber: index + 1,
+                        excerpt: line.trim().slice(0, 240),
+                        matchText: pattern,
+                        evidenceType: fileName.endsWith('.json') || fileName.endsWith('.txt') || fileName.endsWith('Pipfile')
+                            ? 'dependency'
+                            : 'logic_call'
+                    });
+                    break;
+                }
+            }
+        });
+
+        return proofs;
+    }
 
     try {
         // Try to fetch package.json
         const pkgRes = await axios.get(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/package.json?ref=${latestSha}`, { headers, validateStatus: () => true });
         if (pkgRes.status === 200 && pkgRes.data && pkgRes.data.content) {
-            combinedConfigText += Buffer.from(pkgRes.data.content, 'base64').toString('utf-8').toLowerCase();
+            const content = Buffer.from(pkgRes.data.content, 'base64').toString('utf-8');
+            combinedConfigText += content.toLowerCase();
+            addEvidenceFile('package.json', content);
         }
 
         // Try to fetch requirements.txt
         const reqRes = await axios.get(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/requirements.txt?ref=${latestSha}`, { headers, validateStatus: () => true });
         if (reqRes.status === 200 && reqRes.data && reqRes.data.content) {
-            combinedConfigText += Buffer.from(reqRes.data.content, 'base64').toString('utf-8').toLowerCase();
+            const content = Buffer.from(reqRes.data.content, 'base64').toString('utf-8');
+            combinedConfigText += content.toLowerCase();
+            addEvidenceFile('requirements.txt', content);
         }
 
         // Try to fetch Pipfile
         const pipRes = await axios.get(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/Pipfile?ref=${latestSha}`, { headers, validateStatus: () => true });
         if (pipRes.status === 200 && pipRes.data && pipRes.data.content) {
-            combinedConfigText += Buffer.from(pipRes.data.content, 'base64').toString('utf-8').toLowerCase();
+            const content = Buffer.from(pipRes.data.content, 'base64').toString('utf-8');
+            combinedConfigText += content.toLowerCase();
+            addEvidenceFile('Pipfile', content);
         }
 
         // CREATE A SUPER-NORMALIZED CONFIG STRING (Strips spaces, hyphens, underscores)
@@ -443,6 +482,7 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
 
                 if (fingerprints && fingerprints.length > 0) {
                     const lowerRawCode = fingerprints.map(fp => fp.rawCode).join('\n').toLowerCase();
+                    fingerprints.forEach(fp => addEvidenceFile(fp.fileName, fp.rawCode));
                     unverified.forEach(item => {
                         // Check if the claim string appears in the logic code
                         if (lowerRawCode.includes(item.name)) {
@@ -475,6 +515,7 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
     // but the AST imports 3rd party APIs (e.g., openai, anthropic), flag this.
     let semanticSubstitutionViolation = false;
     let violationReason = "";
+    let semanticSubstitutionProofs = [];
 
     const superNormalizedConfig = combinedConfigText.replace(/[-_ ]/g, '');
     const lowerCode = fingerprints ? fingerprints.map(fp => fp.rawCode).join('\n').toLowerCase() : "";
@@ -499,11 +540,40 @@ export async function verifyTechStack(owner, repo, latestSha, claimsArray, heade
     if (hasCustomMLClaim && usesThirdPartyAPI) {
         semanticSubstitutionViolation = true;
         violationReason = "Semantic Substitution Violation: Document claims custom machine learning models (e.g., PyTorch, TensorFlow, ResNet, Swin-Transformer), but codebase imports 3rd-party APIs (e.g., OpenAI, Anthropic) as an architectural shortcut.";
+
+        const providerMatchers = [
+            {
+                provider: 'OpenAI',
+                patterns: ['openai', 'from openai', 'import openai', 'require("openai")', 'require(\'openai\')', 'openai(']
+            },
+            {
+                provider: 'Anthropic',
+                patterns: ['anthropic', 'from anthropic', 'import anthropic', 'require("anthropic")', 'require(\'anthropic\')', 'anthropic(']
+            }
+        ];
+
+        semanticSubstitutionProofs = evidenceFiles.flatMap(file =>
+            providerMatchers.flatMap(({ provider, patterns }) =>
+                findProofsInText(file.content, file.fileName, provider, patterns)
+            )
+        );
+
+        const uniqueProofs = [];
+        const seen = new Set();
+        for (const proof of semanticSubstitutionProofs) {
+            const key = `${proof.provider}:${proof.fileName}:${proof.lineNumber}:${proof.excerpt}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueProofs.push(proof);
+            }
+        }
+        semanticSubstitutionProofs = uniqueProofs.slice(0, 8);
     }
 
     return {
         matrix,
         semanticSubstitutionViolation,
-        violationReason
+        violationReason,
+        semanticSubstitutionProofs
     };
 }
