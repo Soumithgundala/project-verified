@@ -519,7 +519,7 @@ router.post('/link-repo', async (req, res) => {
                 globalOriginality.status  = huntResult.status;
                 globalOriginality.matches = huntResult.matches;
 
-                if (huntResult.matchedCode && parser) {
+                if (huntResult.matchedCode && parser && mainFingerprint?.fileName) {
                   const fileExt = Object.keys(extensionMap).find(ext => mainFingerprint.fileName.endsWith(ext)) || '.js';
                   const langKey = extensionMap[fileExt];
                   if (grammars[langKey]) {

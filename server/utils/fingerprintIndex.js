@@ -213,6 +213,7 @@ export async function getDetailedMatches(studentFingerprints, options = {}) {
         
         matchesByDoc[docId] = rows.map(row => {
             const studentFp = studentMap.get(row.hash);
+            if (!studentFp) return null; // hash in DB but not in current scan — skip
             return {
                 hash: row.hash,
                 uniqueness: hashUniqueness[row.hash] || 0,
@@ -226,7 +227,7 @@ export async function getDetailedMatches(studentFingerprints, options = {}) {
                 sourceStartLine: row.start_line,
                 sourceEndLine: row.end_line
             };
-        });
+        }).filter(Boolean);
     }
 
     return matchesByDoc;
