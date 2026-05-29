@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+requests
+redis
+beautifulsoup4
+lxml
+spacy
+sentence-transformers
+torch
