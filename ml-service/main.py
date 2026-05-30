@@ -1,12 +1,20 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 import uuid
+from contextlib import asynccontextmanager
 
 # We will implement the BullMQ/Redis queue logic in Phase 2. 
 # For now, we will simulate the background task logic using FastAPI's BackgroundTasks.
 from grobid_client import parse_pdf
+from vectorizer import vectorizer_service
 
-app = FastAPI(title="Plagiarism Detection ML Service")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load the heavy LaBSE model into memory once when the server starts
+    vectorizer_service.load_model()
+    yield
+
+app = FastAPI(title="Plagiarism Detection ML Service", lifespan=lifespan)
 
 def mock_vectorization_job(job_id: str, pdf_bytes: bytes):
     """
@@ -26,7 +34,13 @@ def mock_vectorization_job(job_id: str, pdf_bytes: bytes):
     print(f"[{job_id}] Successfully extracted {len(paragraphs)} clean paragraphs.")
     
     # Simulate saving to DB or sending to Phase 2 (LaBSE)
-    print(f"[{job_id}] Snippet of first paragraph: {paragraphs[0][:100]}...")
+    try:
+        vector_results = vectorizer_service.process_document(paragraphs)
+        print(f"[{job_id}] Generated {len(vector_results)} dense vectors from filtered sentences.")
+        if vector_results:
+            print(f"[{job_id}] Snippet of first vectorized sentence: {vector_results[0]['sentence'][:100]}...")
+    except Exception as e:
+        print(f"[{job_id}] Vectorization failed: {e}")
 
 @app.post("/api/v1/extract")
 async def extract_document(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
