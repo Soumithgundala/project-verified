@@ -168,6 +168,22 @@ db.exec(`
         retention_policy TEXT DEFAULT 'job_audit'
     );
 
+    CREATE TABLE IF NOT EXISTS document_ingestions (
+        id TEXT PRIMARY KEY,
+        filename TEXT,
+        file_path TEXT,
+        status TEXT,
+        job_id TEXT,
+        error_message TEXT,
+        completed_at TEXT,
+        tenant_id TEXT DEFAULT '${DEFAULT_TENANT_ID}',
+        created_at TEXT,
+        updated_at TEXT,
+        source_type TEXT DEFAULT 'document_upload',
+        verification_status TEXT DEFAULT 'pending',
+        retention_policy TEXT DEFAULT 'transient_upload'
+    );
+
     CREATE TABLE IF NOT EXISTS upload_archives (
         id TEXT PRIMARY KEY,
         original_name TEXT,
@@ -293,6 +309,7 @@ migrateTenantKeyedHashTable(
     'quarantine_code',
     'whitelisted_hashes',
     'ingestion_jobs',
+    'document_ingestions',
     'upload_archives',
     'submissions',
     'review_overrides'
@@ -307,6 +324,9 @@ addColumnIfMissing('quarantine_code', 'expires_at', 'TEXT');
 addColumnIfMissing('fingerprint_positions', 'start_line', 'INTEGER');
 addColumnIfMissing('fingerprint_positions', 'end_line', 'INTEGER');
 addColumnIfMissing('review_overrides', 'reviewer_id', 'TEXT');
+addColumnIfMissing('document_ingestions', 'job_id', 'TEXT');
+addColumnIfMissing('document_ingestions', 'error_message', 'TEXT');
+addColumnIfMissing('document_ingestions', 'completed_at', 'TEXT');
 
 function separateLegacyQuarantineCode() {
     const rows = db.prepare('SELECT id, payload, tenant_id, created_at FROM quarantine_queue').all();
@@ -351,6 +371,8 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_quarantine_tenant_status ON quarantine_queue(tenant_id, verification_status);
     CREATE INDEX IF NOT EXISTS idx_whitelist_tenant_hash ON whitelisted_hashes(tenant_id, hash);
     CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status ON ingestion_jobs(tenant_id, status);
+    CREATE INDEX IF NOT EXISTS idx_document_ingestions_tenant_status ON document_ingestions(tenant_id, status);
+    CREATE INDEX IF NOT EXISTS idx_document_ingestions_job_id ON document_ingestions(job_id);
     CREATE INDEX IF NOT EXISTS idx_upload_archives_expires_at ON upload_archives(expires_at);
     CREATE INDEX IF NOT EXISTS idx_submissions_tenant_repo ON submissions(tenant_id, owner, repo);
     CREATE INDEX IF NOT EXISTS idx_review_overrides_submission ON review_overrides(tenant_id, submission_id);
