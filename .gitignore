@@ -25,3 +25,7 @@ server/.cache/
 *.njsproj
 *.sln
 *.sw?
+
+server/.env
+requirements.txt
+repomix-output.xml
