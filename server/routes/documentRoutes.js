@@ -1,20 +1,85 @@
 import express from 'express';
 import axios from 'axios';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import multer from 'multer';
 import mammoth from 'mammoth';
+import { fileURLToPath } from 'url';
 import { normalizeTechClaims } from '../utils/ai_wrapper.js';
 import { verifyTechStack } from '../utils/astRadar.js';
 import { parseGithubUrl } from '../utils/urlUtils.js';
 import db from '../db/database.js';
+import { plagiarismQueue } from '../utils/queue.js';
 import { resolveTenantId } from '../utils/tenant.js';
 
 const router = express.Router();
 const MAX_DOCUMENT_UPLOAD_BYTES = Number(process.env.MAX_DOCUMENT_UPLOAD_BYTES || 10 * 1024 * 1024);
 const UPLOAD_ARCHIVE_TTL_MS = Number(process.env.UPLOAD_ARCHIVE_TTL_MS || 60 * 60 * 1000);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DOCUMENT_UPLOAD_ROOT = path.join(__dirname, '..', 'uploads', 'documents');
+const INTERNAL_JOB_CALLBACK_SECRET = process.env.INTERNAL_JOB_CALLBACK_SECRET || '';
+const PDF_MIME_TYPES = new Set(['application/pdf']);
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]);
+
+fs.mkdirSync(DOCUMENT_UPLOAD_ROOT, { recursive: true });
+
+function sanitizeFileName(fileName) {
+  return fileName.replace(/[^\w.-]+/g, '_');
+}
+
+function ensureTenantUploadDir(tenantId) {
+  const uploadDir = path.join(DOCUMENT_UPLOAD_ROOT, tenantId || 'default');
+  fs.mkdirSync(uploadDir, { recursive: true });
+  return uploadDir;
+}
+
+function updateDocumentIngestion(documentId, tenantId, patch) {
+  const normalizedPatch = { ...patch };
+  if (normalizedPatch.status !== undefined && normalizedPatch.verification_status === undefined) {
+    normalizedPatch.verification_status = normalizedPatch.status;
+  }
+
+  const entries = Object.entries(normalizedPatch).filter(([, value]) => value !== undefined);
+  if (!entries.length) return;
+
+  const assignments = entries.map(([column]) => `${column} = ?`).join(', ');
+  const values = entries.map(([, value]) => value);
+  db.prepare(`UPDATE document_ingestions SET ${assignments}, updated_at = ? WHERE id = ? AND tenant_id = ?`)
+    .run(...values, new Date().toISOString(), documentId, tenantId);
+}
+
+function insertDocumentIngestion({ documentId, tenantId, filename, filePath, status, jobId = null, errorMessage = null, completedAt = null }) {
+  const nowIso = new Date().toISOString();
+  db.prepare(`INSERT INTO document_ingestions
+    (id, filename, file_path, status, job_id, error_message, completed_at, tenant_id, created_at, updated_at, source_type, verification_status, retention_policy)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(
+      documentId,
+      filename,
+      filePath,
+      status,
+      jobId,
+      errorMessage,
+      completedAt,
+      tenantId,
+      nowIso,
+      nowIso,
+      'document_upload',
+      status,
+      'transient_upload'
+    );
+}
+
+function getDocumentIngestion(documentId, tenantId) {
+  return db.prepare(`
+    SELECT id, filename, file_path, status, job_id, error_message, completed_at, tenant_id, created_at, updated_at
+    FROM document_ingestions
+    WHERE id = ? AND tenant_id = ?
+  `).get(documentId, tenantId);
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -30,8 +95,47 @@ const upload = multer({
   }
 });
 
+const pdfUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const tenantId = resolveTenantId(req);
+      cb(null, ensureTenantUploadDir(tenantId));
+    },
+    filename: (req, file, cb) => {
+      const documentId = crypto.randomUUID();
+      req.documentUploadId = documentId;
+
+      const originalExtension = path.extname(file.originalname || '').toLowerCase() || '.pdf';
+      const baseName = sanitizeFileName(path.basename(file.originalname || 'document', path.extname(file.originalname || '')));
+      cb(null, `${documentId}-${baseName || 'document'}${originalExtension}`);
+    }
+  }),
+  limits: {
+    fileSize: MAX_DOCUMENT_UPLOAD_BYTES,
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    if (!PDF_MIME_TYPES.has(file.mimetype) && !file.originalname.toLowerCase().endsWith('.pdf')) {
+      return cb(new Error('Only PDF files are supported.'));
+    }
+    cb(null, true);
+  }
+});
+
 function handleDocumentUpload(req, res, next) {
   upload.single('document')(req, res, err => {
+    if (!err) return next();
+
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? `Document upload exceeds the ${Math.round(MAX_DOCUMENT_UPLOAD_BYTES / (1024 * 1024))}MB limit.`
+      : err.message;
+    return res.status(status).json({ success: false, message });
+  });
+}
+
+function handlePdfUpload(req, res, next) {
+  pdfUpload.single('document')(req, res, err => {
     if (!err) return next();
 
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
@@ -55,6 +159,112 @@ const GITHUB_API_BASE = "https://api.github.com";
 const headers = process.env.GITHUB_TOKEN
   ? { Authorization: `token ${process.env.GITHUB_TOKEN}` }
   : {};
+
+router.post('/documents/upload', handlePdfUpload, async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const documentId = req.documentUploadId || crypto.randomUUID();
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Missing document file.' });
+    }
+
+    insertDocumentIngestion({
+      documentId,
+      tenantId,
+      filename: req.file.originalname,
+      filePath: req.file.path,
+      status: 'pending'
+    });
+
+    const job = await plagiarismQueue.add(
+      'extract-vectors',
+      {
+        filePath: req.file.path,
+        documentId,
+        tenantId,
+        filename: req.file.originalname
+      },
+      {
+        jobId: documentId,
+        removeOnComplete: true,
+        removeOnFail: false,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000
+        }
+      }
+    );
+
+    updateDocumentIngestion(documentId, tenantId, {
+      status: 'processing',
+      job_id: job.id || documentId,
+      error_message: null,
+      completed_at: null
+    });
+
+    return res.status(202).json({
+      success: true,
+      message: 'Document queued for processing.',
+      documentId,
+      jobId: job.id || documentId,
+      status: 'processing'
+    });
+  } catch (err) {
+    if (req.file?.path) {
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    }
+
+    try {
+      updateDocumentIngestion(documentId, tenantId, {
+        status: 'failed',
+        error_message: err.message,
+        completed_at: new Date().toISOString()
+      });
+    } catch {
+      // The upload should still fail even if the status update does not persist.
+    }
+
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/internal/job-complete', async (req, res) => {
+  if (INTERNAL_JOB_CALLBACK_SECRET && req.get('x-internal-job-token') !== INTERNAL_JOB_CALLBACK_SECRET) {
+    return res.status(401).json({ success: false, message: 'Unauthorized callback.' });
+  }
+
+  const { documentId, tenantId: bodyTenantId, status, errorMessage } = req.body || {};
+  if (!documentId || !status) {
+    return res.status(400).json({ success: false, message: 'documentId and status are required.' });
+  }
+
+  const tenantId = bodyTenantId || resolveTenantId(req);
+  const normalizedStatus = ['completed', 'failed', 'processing', 'pending'].includes(status) ? status : null;
+  if (!normalizedStatus) {
+    return res.status(400).json({ success: false, message: 'Invalid status.' });
+  }
+
+  const documentRow = getDocumentIngestion(documentId, tenantId);
+  if (!documentRow) {
+    return res.status(404).json({ success: false, message: 'Document ingestion record not found.' });
+  }
+
+  const terminalStatus = normalizedStatus === 'completed' || normalizedStatus === 'failed';
+  updateDocumentIngestion(documentId, tenantId, {
+    status: normalizedStatus,
+    error_message: normalizedStatus === 'failed' ? (errorMessage || 'Document processing failed.') : null,
+    completed_at: terminalStatus ? new Date().toISOString() : documentRow.completed_at
+  });
+
+  return res.json({
+    success: true,
+    message: 'Document status updated.',
+    documentId,
+    status: normalizedStatus
+  });
+});
 
 router.post('/audit-document', handleDocumentUpload, async (req, res) => {
   let uploadId = null;
