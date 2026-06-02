@@ -58,6 +58,11 @@ Background job audit log:
 Audit trail for every `.docx` document upload:
 - `(id, original_name, mime_type, size_bytes, expires_at, verification_status)`
 
+### `document_ingestions`
+Tracks PDF uploads that move through the Redis/BullMQ vectorization pipeline:
+- `(id, filename, file_path, status, job_id, error_message, completed_at)`
+- `status` values: `pending`, `processing`, `completed`, `failed`
+
 ### `submissions`
 Full forensic record of each repository analysis:
 - `(submission_id, owner, repo, sha, student_fingerprints JSON, analysis_results JSON, tenant_id)`

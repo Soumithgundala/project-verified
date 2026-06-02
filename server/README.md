@@ -50,6 +50,8 @@ The server has its own `package.json` separate from the frontend. Key dependenci
 | `openai` | Tertiary LLM fallback |
 | `mammoth` | Extract text from `.docx` files |
 | `multer` | Multipart file upload handling |
+| `bullmq` | Redis-backed document job queue |
+| `ioredis` | Redis client for BullMQ |
 
 ---
 
@@ -74,3 +76,14 @@ Auto-created at startup. Contains:
 | `scripts/` | Admin CLI tools |
 
 > See the README inside each sub-directory for detailed documentation.
+
+## PDF Vectorization Pipeline
+
+The backend now also exposes `POST /api/documents/upload` for PDF ingestion.
+It stores the file under `server/uploads/documents/<tenantId>/`, inserts a
+`document_ingestions` row, and pushes `{ filePath, documentId, tenantId }`
+onto the Redis/BullMQ queue.
+
+The Python worker at `ml-service/worker.py` reads the job, runs GROBID and
+LaBSE, stores vectors in ChromaDB, and calls `POST /api/internal/job-complete`
+to mark the SQLite row `completed` or `failed`.

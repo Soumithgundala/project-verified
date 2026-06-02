@@ -145,3 +145,32 @@ All routes are wrapped in `try/catch`. Errors return `{ success: false, message:
 
 ### Module Versions
 `repoRoutes.js` defines `MODULE_VERSIONS` constants. When algorithm logic changes, bumping a version number automatically invalidates the disk cache for that module, forcing a recomputation on the next request.
+
+---
+
+## `documentRoutes.js` Additions
+
+### `POST /api/documents/upload`
+
+**Purpose:** Upload a PDF, persist it on disk, enqueue it for LaBSE vectorization, and return `202 Accepted`.
+
+**Body (multipart/form-data):**
+- `document` â€” `.pdf` file
+
+**Flow:**
+1. `multer` writes the file into `server/uploads/documents/<tenantId>/`
+2. Insert a `document_ingestions` row with `status = 'pending'`
+3. Push `{ filePath, documentId, tenantId }` onto the Redis/BullMQ queue
+4. Mark the row `processing` and return the job id immediately
+
+### `POST /api/internal/job-complete`
+
+**Purpose:** Internal callback from the Python worker after ChromaDB persistence.
+
+**Body:** `{ documentId, tenantId, status, errorMessage? }`
+
+**Flow:**
+1. Optional shared-secret header check via `X-Internal-Job-Token`
+2. Update `document_ingestions.status`
+3. Stamp `completed_at` for terminal statuses
+4. Save any worker error message for debugging
