@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  grobid:
+    image: grobid/grobid:0.8.2
+    container_name: grobid
+    ports:
+      - "8070:8070"
+    restart: unless-stopped
+    # We can add a healthcheck later or limit memory since GROBID can be heavy
+  redis:
+    image: redis:alpine
+    container_name: project-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
