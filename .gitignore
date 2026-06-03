@@ -27,5 +27,25 @@ server/.cache/
 *.sw?
 
 server/.env
-requirements.txt
 repomix-output.xml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+venv/
+.venv/
+
+# Database & Vector Store
+chroma_data/
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Local Uploads
+server/uploads/
+
