@@ -49,3 +49,5 @@ chroma_data/
 # Local Uploads
 server/uploads/
 
+#local test assets
+/test_document.pdf
