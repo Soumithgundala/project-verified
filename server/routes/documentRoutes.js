@@ -258,6 +258,14 @@ router.post('/internal/job-complete', async (req, res) => {
     completed_at: terminalStatus ? new Date().toISOString() : documentRow.completed_at
   });
 
+  if (terminalStatus && documentRow.file_path) {
+    try {
+      await fs.promises.unlink(documentRow.file_path);
+    } catch {
+      // If the file is already missing or cannot be deleted, it doesn't crash the server.
+    }
+  }
+
   return res.json({
     success: true,
     message: 'Document status updated.',
