@@ -143,7 +143,9 @@ async def main() -> None:
 
     shutdown_event = asyncio.Event()
     worker = Worker(QUEUE_NAME, process_job, {
-        "connection": REDIS_URL
+        "connection": REDIS_URL,
+        "lockDuration": 300000,
+        "concurrency": 1
     })
 
     def handle_shutdown(signum, frame):
