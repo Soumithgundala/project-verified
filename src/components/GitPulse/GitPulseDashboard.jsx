@@ -20,6 +20,76 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
     error: null
   });
 
+  if (data.documentOnly) {
+    const report = data.document?.plagiarismReport;
+    const filename = data.document?.filename || 'Document';
+    const status = data.document?.status || 'completed';
+
+    return (
+      <div className="report-container">
+        <div className="dashboard-grid">
+          {/* Main Card: Plagiarism Score */}
+          <div className="card hero-card warning" style={{ gridColumn: 'span 12' }}>
+            <div className="watermark"><Fingerprint size={150} /></div>
+            <p className="card-label"><ShieldCheck size={16} /> Document Plagiarism Score</p>
+            <h2 className="score-value">{report ? `${report.plagiarismScore}%` : '0%'}</h2>
+            <div className="status-badge-wrapper">
+              <span className="status-badge">
+                <FileText size={16} />
+                {filename} ({status})
+              </span>
+            </div>
+          </div>
+
+          {/* Details Card */}
+          <div className="card matrix-card" style={{ gridColumn: 'span 12' }}>
+            <div className="matrix-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                <h3 className="matrix-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                  <ShieldAlert size={20} style={{ color: '#4f46e5' }} /> Semantic Plagiarism Report
+                </h3>
+                {report && (
+                  <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem' }}>
+                    <div><span style={{ color: '#64748b' }}>Total Sentences:</span> <span style={{ fontWeight: 600 }}>{report.totalSentencesCount}</span></div>
+                    <div><span style={{ color: '#64748b' }}>Matched Sentences:</span> <span style={{ fontWeight: 600 }}>{report.matchedSentencesCount}</span></div>
+                    <div><span style={{ color: '#64748b' }}>Source Documents:</span> <span style={{ fontWeight: 600 }}>{report.sourcesCount}</span></div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="scrollable" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
+              {report && report.matchedSentences && report.matchedSentences.length > 0 ? (
+                report.matchedSentences.map((match, idx) => (
+                  <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <div style={{ fontWeight: 600, color: '#e11d48', fontSize: '0.875rem' }}>Sentence Match #{idx + 1}</div>
+                      <div style={{ fontWeight: 500, color: '#64748b', fontSize: '0.82rem' }}>L2 Distance: {match.distance.toFixed(4)}</div>
+                    </div>
+                    <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
+                      <div>
+                        <strong style={{ color: '#64748b' }}>Uploaded Document:</strong>
+                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic' }}>"{match.sentence}"</p>
+                      </div>
+                      <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
+                        <strong style={{ color: '#64748b' }}>Source Document (ID: {match.sourceDocumentId}):</strong>
+                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
+                  No semantic plagiarism was detected for this document. It is clean!
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const submitOverride = async (action, sourceUrl = null) => {
     if (!data.submissionId) return;
     const reason = window.prompt('Enter the reviewer reason for the audit trail:');
