@@ -35,24 +35,60 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
       try {
         if (!inFlightAnalyses.has(requestKey)) {
           inFlightAnalyses.set(requestKey, (async () => {
-            const repoFetch = fetch('http://localhost:5000/api/link-repo', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ url: linkedUrl }),
-            }).then(r => r.json());
-
-            let auditFetch = Promise.resolve({});
-            if (auditDocument) {
+            if (!linkedUrl && auditDocument) {
+              // 1. Upload the document to GET a job started
               const formData = new FormData();
-              formData.append('githubUrl', linkedUrl);
               formData.append('document', auditDocument);
-              auditFetch = fetch('http://localhost:5000/api/audit-document', {
+              const uploadResp = await fetch('http://localhost:5000/api/documents/upload', {
                 method: 'POST',
                 body: formData,
               }).then(r => r.json());
-            }
 
-            return Promise.all([repoFetch, auditFetch]);
+              if (!uploadResp.success) {
+                throw new Error(uploadResp.message || 'Upload failed');
+              }
+
+              const docId = uploadResp.documentId;
+              
+              // 2. Poll the status until completed
+              const pollStatus = async () => {
+                const statusResp = await fetch(`http://localhost:5000/api/documents/${docId}`).then(r => r.json());
+                if (!statusResp.success) {
+                  throw new Error(statusResp.message || 'Polling failed');
+                }
+                if (statusResp.document.status === 'completed') {
+                  return statusResp.document;
+                }
+                if (statusResp.document.status === 'failed') {
+                  throw new Error(statusResp.document.errorMessage || 'Document processing failed');
+                }
+                // Wait 1.5s and try again
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                return pollStatus();
+              };
+
+              const docResult = await pollStatus();
+              return [null, docResult];
+            } else {
+              const repoFetch = fetch('http://localhost:5000/api/link-repo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: linkedUrl }),
+              }).then(r => r.json());
+
+              let auditFetch = Promise.resolve({});
+              if (auditDocument) {
+                const formData = new FormData();
+                formData.append('githubUrl', linkedUrl);
+                formData.append('document', auditDocument);
+                auditFetch = fetch('http://localhost:5000/api/audit-document', {
+                  method: 'POST',
+                  body: formData,
+                }).then(r => r.json());
+              }
+
+              return Promise.all([repoFetch, auditFetch]);
+            }
           })().finally(() => {
             inFlightAnalyses.delete(requestKey);
           }));
@@ -60,7 +96,9 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
 
         const [repoResult, auditResult] = await inFlightAnalyses.get(requestKey);
 
-        if (repoResult.success) {
+        if (!linkedUrl && auditResult) {
+          setData({ success: true, documentOnly: true, document: auditResult });
+        } else if (repoResult && repoResult.success) {
           setData({ ...repoResult, ...auditResult });
         } else {
           throw new Error("Repository analysis failed");
@@ -72,7 +110,7 @@ const GitPulseMVP = ({ linkedUrl, auditDocument, onReset, initialData = null, is
         activeRequestKey.current = null;
       }
     };
-    if (linkedUrl && !initialData) analyzeRepo();
+    if ((linkedUrl || auditDocument) && !initialData) analyzeRepo();
   }, [linkedUrl, auditDocument, initialData]);
 
   useEffect(() => {
