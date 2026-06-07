@@ -15,10 +15,16 @@ const GithubConnect = ({ onRepoLinked }) => {
       return;
     }
 
-    if (repoUrl.toLowerCase().includes('github.com')) {
-      onRepoLinked({ url: repoUrl, document: auditFile });
+    if (repoUrl) {
+      if (repoUrl.toLowerCase().includes('github.com')) {
+        onRepoLinked({ url: repoUrl, document: auditFile });
+      } else {
+        setError("Please enter a valid GitHub repository URL.");
+      }
+    } else if (auditFile) {
+      onRepoLinked({ url: '', document: auditFile });
     } else {
-      setError("Please enter a valid GitHub repository URL.");
+      setError("Please enter a GitHub repository URL or upload a document.");
     }
   };
 
@@ -106,9 +112,9 @@ const GithubConnect = ({ onRepoLinked }) => {
         <button
           onClick={handleLinkRepo}
           className="connect-button"
-          disabled={!repoUrl}
+          disabled={!repoUrl && !auditFile}
         >
-          Link Project History
+          {repoUrl ? "Link Project History" : "Scan Document Plagiarism"}
         </button>
       </div>
 
