@@ -56,7 +56,14 @@ def build_vector_records(document_id: str, tenant_id: str, vector_results: list[
     }
 
 
-def notify_node(document_id: str, tenant_id: str, status: str, error_message: str | None = None, vector_count: int | None = None) -> None:
+def notify_node(
+    document_id: str,
+    tenant_id: str,
+    status: str,
+    error_message: str | None = None,
+    vector_count: int | None = None,
+    plagiarism_report: Dict[str, Any] | None = None
+) -> None:
     payload: Dict[str, Any] = {
         "documentId": document_id,
         "tenantId": tenant_id,
@@ -68,6 +75,9 @@ def notify_node(document_id: str, tenant_id: str, status: str, error_message: st
 
     if vector_count is not None:
         payload["vectorCount"] = vector_count
+
+    if plagiarism_report is not None:
+        payload["plagiarismReport"] = plagiarism_report
 
     headers = {}
     if INTERNAL_JOB_CALLBACK_SECRET:
@@ -86,21 +96,79 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
     file_path = job_data.get("filePath")
     document_id = job_data.get("documentId")
     tenant_id = job_data.get("tenantId", "default")
+    paragraphs = job_data.get("paragraphs")
 
-    if not file_path or not document_id:
-        raise ValueError("Job is missing filePath or documentId.")
+    if not document_id:
+        raise ValueError("Job is missing documentId.")
 
-    pdf_path = Path(file_path)
-    if not pdf_path.exists():
-        raise FileNotFoundError(f"Uploaded file not found: {file_path}")
+    if paragraphs is None and not file_path:
+        raise ValueError("Job is missing both paragraphs and filePath.")
 
     try:
-        pdf_bytes = pdf_path.read_bytes()
-        paragraphs = parse_pdf(pdf_bytes)
-        vector_results = vectorizer_service.process_document(paragraphs)
+        if paragraphs is not None:
+            vector_results = vectorizer_service.process_document(paragraphs)
+        else:
+            pdf_path = Path(file_path)
+            if not pdf_path.exists():
+                raise FileNotFoundError(f"Uploaded file not found: {file_path}")
+            pdf_bytes = pdf_path.read_bytes()
+            paragraphs_extracted = parse_pdf(pdf_bytes)
+            vector_results = vectorizer_service.process_document(paragraphs_extracted)
 
         vector_payload = build_vector_records(document_id, tenant_id, vector_results)
+        plagiarism_report = None
+
         if vector_payload["ids"]:
+            try:
+                # Query ChromaDB for similar sentences before upserting this document
+                query_results = collection.query(
+                    query_embeddings=vector_payload["embeddings"],
+                    n_results=1,
+                    where={"tenant_id": tenant_id}
+                )
+
+                matched_sentences = []
+                unique_sources = set()
+                threshold = 0.35 # L2 distance threshold (~82.5% similarity)
+
+                ids_list = query_results.get("ids", [])
+                distances_list = query_results.get("distances", [])
+                metadatas_list = query_results.get("metadatas", [])
+                documents_list = query_results.get("documents", [])
+
+                for idx, sentence in enumerate(vector_payload["documents"]):
+                    if idx < len(distances_list) and distances_list[idx]:
+                        distance = distances_list[idx][0]
+                        metadata = metadatas_list[idx][0]
+                        matched_doc = documents_list[idx][0]
+
+                        # Exclude self-matches (safeguard)
+                        if metadata.get("document_id") == document_id:
+                            continue
+
+                        if distance <= threshold:
+                            matched_sentences.append({
+                                "sentence": sentence,
+                                "matchedSentence": matched_doc,
+                                "distance": float(distance),
+                                "sourceDocumentId": metadata.get("document_id"),
+                                "sourceChunkIndex": int(metadata.get("chunk_index"))
+                            })
+                            unique_sources.add(metadata.get("document_id"))
+
+                total_sentences = len(vector_payload["documents"])
+                plagiarism_score = (len(matched_sentences) / total_sentences * 100) if total_sentences > 0 else 0.0
+
+                plagiarism_report = {
+                    "plagiarismScore": round(plagiarism_score, 2),
+                    "matchedSentencesCount": len(matched_sentences),
+                    "totalSentencesCount": total_sentences,
+                    "matchedSentences": matched_sentences[:20], # limit payload size
+                    "sourcesCount": len(unique_sources)
+                }
+            except Exception as e:
+                print(f"Error checking plagiarism: {e}")
+
             collection.upsert(
                 ids=vector_payload["ids"],
                 embeddings=vector_payload["embeddings"],
@@ -112,7 +180,8 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
             document_id=document_id,
             tenant_id=tenant_id,
             status="completed",
-            vector_count=len(vector_payload["ids"])
+            vector_count=len(vector_payload["ids"]),
+            plagiarism_report=plagiarism_report
         )
 
         return {
