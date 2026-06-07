@@ -75,7 +75,7 @@ function insertDocumentIngestion({ documentId, tenantId, filename, filePath, sta
 
 function getDocumentIngestion(documentId, tenantId) {
   return db.prepare(`
-    SELECT id, filename, file_path, status, job_id, error_message, completed_at, tenant_id, created_at, updated_at
+    SELECT id, filename, file_path, status, job_id, error_message, completed_at, tenant_id, created_at, updated_at, plagiarism_report
     FROM document_ingestions
     WHERE id = ? AND tenant_id = ?
   `).get(documentId, tenantId);
@@ -95,7 +95,7 @@ const upload = multer({
   }
 });
 
-const pdfUpload = multer({
+const pdfAndDocxUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       const tenantId = resolveTenantId(req);
@@ -115,8 +115,9 @@ const pdfUpload = multer({
     files: 1
   },
   fileFilter: (req, file, cb) => {
-    if (!PDF_MIME_TYPES.has(file.mimetype) && !file.originalname.toLowerCase().endsWith('.pdf')) {
-      return cb(new Error('Only PDF files are supported.'));
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (ext !== '.pdf' && ext !== '.docx') {
+      return cb(new Error('Only PDF and DOCX files are supported.'));
     }
     cb(null, true);
   }
@@ -134,8 +135,8 @@ function handleDocumentUpload(req, res, next) {
   });
 }
 
-function handlePdfUpload(req, res, next) {
-  pdfUpload.single('document')(req, res, err => {
+function handlePdfAndDocxUpload(req, res, next) {
+  pdfAndDocxUpload.single('document')(req, res, err => {
     if (!err) return next();
 
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
@@ -160,7 +161,7 @@ const headers = process.env.GITHUB_TOKEN
   ? { Authorization: `token ${process.env.GITHUB_TOKEN}` }
   : {};
 
-router.post('/documents/upload', handlePdfUpload, async (req, res) => {
+router.post('/documents/upload', handlePdfAndDocxUpload, async (req, res) => {
   const tenantId = resolveTenantId(req);
   const documentId = req.documentUploadId || crypto.randomUUID();
 
@@ -169,22 +170,38 @@ router.post('/documents/upload', handlePdfUpload, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing document file.' });
     }
 
+    const isDocx = req.file.originalname.toLowerCase().endsWith('.docx');
+
     insertDocumentIngestion({
       documentId,
       tenantId,
       filename: req.file.originalname,
-      filePath: req.file.path,
+      filePath: isDocx ? '' : req.file.path,
       status: 'pending'
     });
 
+    const jobData = {
+      documentId,
+      tenantId,
+      filename: req.file.originalname
+    };
+
+    if (isDocx) {
+      const buffer = fs.readFileSync(req.file.path);
+      const result = await mammoth.extractRawText({ buffer });
+      const fullText = result.value;
+      const paragraphs = fullText.split(/\r?\n\r?\n/).map(p => p.trim()).filter(Boolean);
+      jobData.paragraphs = paragraphs;
+
+      // Clean up docx file from disk immediately
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    } else {
+      jobData.filePath = req.file.path;
+    }
+
     const job = await plagiarismQueue.add(
       'extract-vectors',
-      {
-        filePath: req.file.path,
-        documentId,
-        tenantId,
-        filename: req.file.originalname
-      },
+      jobData,
       {
         jobId: documentId,
         removeOnComplete: true,
@@ -235,7 +252,7 @@ router.post('/internal/job-complete', async (req, res) => {
     return res.status(401).json({ success: false, message: 'Unauthorized callback.' });
   }
 
-  const { documentId, tenantId: bodyTenantId, status, errorMessage } = req.body || {};
+  const { documentId, tenantId: bodyTenantId, status, errorMessage, plagiarismReport } = req.body || {};
   if (!documentId || !status) {
     return res.status(400).json({ success: false, message: 'documentId and status are required.' });
   }
@@ -255,7 +272,8 @@ router.post('/internal/job-complete', async (req, res) => {
   updateDocumentIngestion(documentId, tenantId, {
     status: normalizedStatus,
     error_message: normalizedStatus === 'failed' ? (errorMessage || 'Document processing failed.') : null,
-    completed_at: terminalStatus ? new Date().toISOString() : documentRow.completed_at
+    completed_at: terminalStatus ? new Date().toISOString() : documentRow.completed_at,
+    plagiarism_report: plagiarismReport ? JSON.stringify(plagiarismReport) : null
   });
 
   if (terminalStatus && documentRow.file_path) {
@@ -272,6 +290,37 @@ router.post('/internal/job-complete', async (req, res) => {
     documentId,
     status: normalizedStatus
   });
+});
+
+router.get('/documents/:documentId', async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const { documentId } = req.params;
+
+  try {
+    const documentRow = getDocumentIngestion(documentId, tenantId);
+    if (!documentRow) {
+      return res.status(404).json({ success: false, message: 'Document ingestion record not found.' });
+    }
+
+    const plagiarismReport = documentRow.plagiarism_report 
+      ? JSON.parse(documentRow.plagiarism_report) 
+      : null;
+
+    return res.json({
+      success: true,
+      document: {
+        id: documentRow.id,
+        filename: documentRow.filename,
+        status: documentRow.status,
+        errorMessage: documentRow.error_message,
+        completedAt: documentRow.completed_at,
+        createdAt: documentRow.created_at,
+        plagiarismReport
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 router.post('/audit-document', handleDocumentUpload, async (req, res) => {
