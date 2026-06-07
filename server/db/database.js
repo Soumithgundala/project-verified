@@ -327,6 +327,7 @@ addColumnIfMissing('review_overrides', 'reviewer_id', 'TEXT');
 addColumnIfMissing('document_ingestions', 'job_id', 'TEXT');
 addColumnIfMissing('document_ingestions', 'error_message', 'TEXT');
 addColumnIfMissing('document_ingestions', 'completed_at', 'TEXT');
+addColumnIfMissing('document_ingestions', 'plagiarism_report', 'TEXT');
 
 function separateLegacyQuarantineCode() {
     const rows = db.prepare('SELECT id, payload, tenant_id, created_at FROM quarantine_queue').all();
