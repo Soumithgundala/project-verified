@@ -3,6 +3,72 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } fro
 import '../styles/GitPulse/GitPulsePdfReport.css';
 
 const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
+  if (data.documentOnly) {
+    const report = data.document?.plagiarismReport;
+    const filename = data.document?.filename || 'Document';
+    const status = data.document?.status || 'completed';
+
+    return (
+      <div className={`pdf-container ${isPrinting ? 'is-printing' : ''}`}>
+        <div className="pdf-header">
+          <div>
+            <h1 className="pdf-title">Document Forensic Plagiarism Report</h1>
+            <p className="pdf-subtitle">Filename: <strong>{filename}</strong></p>
+            <p className="pdf-subtitle">Generated: <strong>{new Date().toLocaleString()}</strong></p>
+          </div>
+          <div className="pdf-score-wrapper">
+            <p className="pdf-score-label">Plagiarism Score</p>
+            <h2 className="pdf-score-value">{report ? `${report.plagiarismScore}%` : '0%'}</h2>
+            <span className={`pdf-status-badge ${report && report.plagiarismScore > 0 ? 'warning' : 'authentic'}`}>
+              {report && report.plagiarismScore > 0 ? 'PLAGIARISM DETECTED' : 'CLEAN'}
+            </span>
+          </div>
+        </div>
+
+        <div className="pdf-section no-break">
+          <h3 className="pdf-section-title">Semantic Plagiarism Details</h3>
+          <div className="pdf-evidence-summary">
+            <div>
+              <p className="pdf-stat-label">Total Sentences</p>
+              <p className="pdf-evidence-metric">{report?.totalSentencesCount}</p>
+            </div>
+            <div>
+              <p className="pdf-stat-label">Matched Sentences</p>
+              <p className="pdf-evidence-metric">{report?.matchedSentencesCount}</p>
+            </div>
+            <div>
+              <p className="pdf-stat-label">Source Documents</p>
+              <p className="pdf-evidence-metric">{report?.sourcesCount}</p>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {report && report.matchedSentences && report.matchedSentences.length > 0 ? (
+              report.matchedSentences.map((match, idx) => (
+                <div key={idx} className="pdf-receipt-box" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '15px', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#e11d48' }}>Sentence Match #{idx + 1}</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>L2 Distance: {match.distance.toFixed(4)}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#334155' }}>
+                    <p style={{ margin: '5px 0' }}><strong>Uploaded File:</strong> <span style={{ fontStyle: 'italic' }}>"{match.sentence}"</span></p>
+                    <p style={{ margin: '5px 0', borderTop: '1px dashed #cbd5e1', paddingTop: '5px' }}>
+                      <strong>Source File (ID: {match.sourceDocumentId}):</strong> <span style={{ fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</span>
+                    </p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="pdf-evidence-empty-box">
+                <p className="pdf-evidence-empty">No semantic plagiarism was detected for this document.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const evidenceReport = data.evidenceReport;
   const humanOverrides = data.humanOverrides || [];
   const parserDiagnostics = data.analysis?.parserDiagnostics;
