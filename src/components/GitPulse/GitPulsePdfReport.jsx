@@ -632,6 +632,52 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
           </table>
         </div>
       )}
+ 
+      {/* --- DOCUMENT PLAGIARISM REPORT --- */}
+      {data.document?.plagiarismReport && (
+        <div className="pdf-section no-break">
+          <h3 className="pdf-section-title" style={{ borderBottomColor: '#e11d48' }}>Document Plagiarism Report</h3>
+          <div className="pdf-evidence-summary">
+            <div>
+              <p className="pdf-stat-label">Plagiarism Score</p>
+              <p className="pdf-evidence-classification" style={{ color: '#e11d48', fontSize: '18px' }}>
+                {data.document.plagiarismReport.plagiarismScore}%
+              </p>
+            </div>
+            <div>
+              <p className="pdf-stat-label">Total Sentences</p>
+              <p className="pdf-evidence-metric">{data.document.plagiarismReport.totalSentencesCount}</p>
+            </div>
+            <div>
+              <p className="pdf-stat-label">Matched Sentences</p>
+              <p className="pdf-evidence-metric">{data.document.plagiarismReport.matchedSentencesCount}</p>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {data.document.plagiarismReport.matchedSentences && data.document.plagiarismReport.matchedSentences.length > 0 ? (
+              data.document.plagiarismReport.matchedSentences.map((match, idx) => (
+                <div key={idx} className="pdf-receipt-box" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '15px', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#e11d48' }}>Sentence Match #{idx + 1}</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>L2 Distance: {match.distance.toFixed(4)}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#334155' }}>
+                    <p style={{ margin: '5px 0' }}><strong>Uploaded File:</strong> <span style={{ fontStyle: 'italic' }}>"{match.sentence}"</span></p>
+                    <p style={{ margin: '5px 0', borderTop: '1px dashed #cbd5e1', paddingTop: '5px' }}>
+                      <strong>Source File (ID: {match.sourceDocumentId}):</strong> <span style={{ fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</span>
+                    </p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="pdf-evidence-empty-box">
+                <p className="pdf-evidence-empty">No semantic plagiarism was detected for this document.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="pdf-appendix">
         <h2 className="pdf-appendix-title">Appendix: Understanding the Metrics</h2>
