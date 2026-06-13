@@ -324,6 +324,57 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
             </div>
           </div>
         )}
+ 
+        {/* --- DOCUMENT PLAGIARISM REPORT --- */}
+        {data.document?.plagiarismReport && (
+          <div className="card matrix-card" style={{ borderTopColor: '#e11d48' }}>
+            <div className="matrix-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                <h3 className="matrix-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                  <Fingerprint size={20} style={{ color: '#e11d48' }} /> Document Plagiarism Report
+                </h3>
+                <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem' }}>
+                  <div><span style={{ color: '#64748b' }}>Total Sentences:</span> <span style={{ fontWeight: 600 }}>{data.document.plagiarismReport.totalSentencesCount}</span></div>
+                  <div><span style={{ color: '#64748b' }}>Matched Sentences:</span> <span style={{ fontWeight: 600 }}>{data.document.plagiarismReport.matchedSentencesCount}</span></div>
+                  <div><span style={{ color: '#64748b' }}>Source Documents:</span> <span style={{ fontWeight: 600 }}>{data.document.plagiarismReport.sourcesCount}</span></div>
+                </div>
+              </div>
+              <div className="matrix-score-badge" style={{ marginTop: '0.5rem', alignSelf: 'flex-end' }}>
+                <p className="matrix-score-label">Plagiarism Score</p>
+                <span className="matrix-score-value matrix-score-low" style={{ color: '#e11d48' }}>
+                  {data.document.plagiarismReport.plagiarismScore}%
+                </span>
+              </div>
+            </div>
+
+            <div className="scrollable" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
+              {data.document.plagiarismReport.matchedSentences && data.document.plagiarismReport.matchedSentences.length > 0 ? (
+                data.document.plagiarismReport.matchedSentences.map((match, idx) => (
+                  <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <div style={{ fontWeight: 600, color: '#e11d48', fontSize: '0.875rem' }}>Sentence Match #{idx + 1}</div>
+                      <div style={{ fontWeight: 500, color: '#64748b', fontSize: '0.82rem' }}>L2 Distance: {match.distance.toFixed(4)}</div>
+                    </div>
+                    <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
+                      <div>
+                        <strong style={{ color: '#64748b' }}>Uploaded Document:</strong>
+                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic' }}>"{match.sentence}"</p>
+                      </div>
+                      <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
+                        <strong style={{ color: '#64748b' }}>Source Document (ID: {match.sourceDocumentId}):</strong>
+                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
+                  No semantic plagiarism was detected for this document. It is clean!
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {Object.entries(data.clusters).map(([key, group]) => (
           <div key={key} className={`card cluster-card border-${key}`}>
