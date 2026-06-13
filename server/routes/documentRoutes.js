@@ -348,6 +348,55 @@ router.post('/audit-document', handleDocumentUpload, async (req, res) => {
     const result = await mammoth.extractRawText({ buffer: req.file.buffer });
     const fullText = result.value;
 
+    // Trigger plagiarism check on the document
+    const paragraphs = fullText.split(/\r?\n\r?\n/).map(p => p.trim()).filter(Boolean);
+    insertDocumentIngestion({
+      documentId: uploadId,
+      tenantId,
+      filename: req.file.originalname,
+      filePath: '',
+      status: 'pending'
+    });
+
+    const job = await plagiarismQueue.add(
+      'extract-vectors',
+      {
+        documentId: uploadId,
+        tenantId,
+        filename: req.file.originalname,
+        paragraphs
+      },
+      {
+        jobId: uploadId,
+        removeOnComplete: true,
+        removeOnFail: false,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000
+        }
+      }
+    );
+
+    updateDocumentIngestion(uploadId, tenantId, {
+      status: 'processing',
+      job_id: job.id || uploadId
+    });
+
+    // Poll for plagiarism report completion
+    let plagiarismReport = null;
+    const maxPollAttempts = 60; // 30 seconds max
+    for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const docStatus = getDocumentIngestion(uploadId, tenantId);
+      if (docStatus && (docStatus.status === 'completed' || docStatus.status === 'failed')) {
+        if (docStatus.status === 'completed' && docStatus.plagiarism_report) {
+          plagiarismReport = JSON.parse(docStatus.plagiarism_report);
+        }
+        break;
+      }
+    }
+
     // 2. Fuzzy Window Slicer
     let textSlice = "";
     // Regex looking for common tech stack section headers
@@ -403,7 +452,13 @@ router.post('/audit-document', handleDocumentUpload, async (req, res) => {
       claimsDetected: claimsArray,
       semanticSubstitutionViolation,
       violationReason,
-      semanticSubstitutionProofs
+      semanticSubstitutionProofs,
+      document: {
+        id: uploadId,
+        filename: req.file.originalname,
+        status: plagiarismReport ? 'completed' : 'failed',
+        plagiarismReport
+      }
     });
 
   } catch (err) {
