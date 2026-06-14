@@ -11,6 +11,7 @@ from bullmq import Worker
 
 from grobid_client import parse_pdf
 from vectorizer import vectorizer_service
+from scrapingdog_scraper import extract_unique_sentences, search_scrapingdog
 
 QUEUE_NAME = os.getenv("DOCUMENT_QUEUE_NAME", "document-vectorization")
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
@@ -106,21 +107,51 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         if paragraphs is not None:
-            vector_results = vectorizer_service.process_document(paragraphs)
+            document_paragraphs = paragraphs
         else:
             pdf_path = Path(file_path)
             if not pdf_path.exists():
                 raise FileNotFoundError(f"Uploaded file not found: {file_path}")
             pdf_bytes = pdf_path.read_bytes()
-            paragraphs_extracted = parse_pdf(pdf_bytes)
-            vector_results = vectorizer_service.process_document(paragraphs_extracted)
+            document_paragraphs = parse_pdf(pdf_bytes)
+
+        vector_results = vectorizer_service.process_document(document_paragraphs)
+        cleaned_document_text = "\n".join(document_paragraphs)
+        suspect_sentences = []
+        if cleaned_document_text.strip():
+            suspect_sentences = extract_unique_sentences(cleaned_document_text, limit=3)
 
         vector_payload = build_vector_records(document_id, tenant_id, vector_results)
         plagiarism_report = None
 
         if vector_payload["ids"]:
             try:
-                # Query ChromaDB for similar sentences before upserting this document
+                # 1. Search Live Web using ScrapingDog
+                scrapingdog_api_key = os.getenv("SCRAPINGDOG_API")
+                web_matched_sentences = []
+                unique_web_sources = set()
+
+                if scrapingdog_api_key and suspect_sentences:
+                    for sentence in suspect_sentences:
+                        print(f"Checking web for: {sentence[:50]}...")
+                        search_results = search_scrapingdog(sentence, scrapingdog_api_key)
+                        if search_results:
+                            print("🚨 MATCH FOUND ON LIVE WEB!")
+                            for res in search_results:
+                                url = res.get("url")
+                                title = res.get("title")
+                                snippet = res.get("snippet")
+                                if url:
+                                    unique_web_sources.add(url)
+                                    web_matched_sentences.append({
+                                        "sentence": sentence,
+                                        "matchedSentence": f"{title} — {snippet}" if title or snippet else "Google Search Match",
+                                        "distance": 0.0,  # Exact search matches have 0.0 L2 distance
+                                        "sourceDocumentId": url,
+                                        "sourceChunkIndex": 0
+                                    })
+
+                # 2. Query ChromaDB for similar sentences before upserting this document
                 query_results = collection.query(
                     query_embeddings=vector_payload["embeddings"],
                     n_results=1,
@@ -156,12 +187,23 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
                             })
                             unique_sources.add(metadata.get("document_id"))
 
+                # 3. Combine web matches and local matches
+                for match in web_matched_sentences:
+                    matched_sentences.append(match)
+                for url in unique_web_sources:
+                    unique_sources.add(url)
+
+                # 4. Calculate score based on unique matching sentences from the uploaded document
+                matched_uploaded_sentences = set()
+                for match in matched_sentences:
+                    matched_uploaded_sentences.add(match["sentence"])
+
                 total_sentences = len(vector_payload["documents"])
-                plagiarism_score = (len(matched_sentences) / total_sentences * 100) if total_sentences > 0 else 0.0
+                plagiarism_score = (len(matched_uploaded_sentences) / total_sentences * 100) if total_sentences > 0 else 0.0
 
                 plagiarism_report = {
                     "plagiarismScore": round(plagiarism_score, 2),
-                    "matchedSentencesCount": len(matched_sentences),
+                    "matchedSentencesCount": len(matched_uploaded_sentences),
                     "totalSentencesCount": total_sentences,
                     "matchedSentences": matched_sentences[:20], # limit payload size
                     "sourcesCount": len(unique_sources)
