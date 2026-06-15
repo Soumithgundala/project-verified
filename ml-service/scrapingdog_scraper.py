@@ -36,20 +36,25 @@ except OSError:
     download("en_core_web_sm")
     nlp = spacy.load("en_core_web_sm")
 
-def extract_unique_sentences(text, limit=3):
+def extract_unique_sentences(text_or_list, limit=3):
     """Extract the most complex sentences to search for plagiarism."""
-    if not text:
+    if not text_or_list:
         return []
-    doc = nlp(text)
-    scored_sentences = []
     
-    for sent in doc.sents:
-        # Filter out short/common sentences (like "Machine learning is good")
-        words = sent.text.split()
+    if isinstance(text_or_list, list):
+        sentences = text_or_list
+    else:
+        doc = nlp(text_or_list)
+        sentences = [sent.text.strip() for sent in doc.sents]
+        
+    scored_sentences = []
+    for sent in sentences:
+        sent_doc = nlp(sent)
+        words = sent.split()
         if len(words) > 10:  
             # Score complexity based on length + number of named entities
-            score = len(sent.ents) + len(words)
-            scored_sentences.append((score, sent.text.strip()))
+            score = len(sent_doc.ents) + len(words)
+            scored_sentences.append((score, sent))
     
     # Sort by complexity and grab the top 'limit' sentences
     scored_sentences.sort(reverse=True, key=lambda x: x[0])
