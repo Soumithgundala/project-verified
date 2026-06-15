@@ -60,24 +60,40 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
 
             <div className="scrollable" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
               {report && report.matchedSentences && report.matchedSentences.length > 0 ? (
-                report.matchedSentences.map((match, idx) => (
-                  <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <div style={{ fontWeight: 600, color: '#e11d48', fontSize: '0.875rem' }}>Sentence Match #{idx + 1}</div>
-                      <div style={{ fontWeight: 500, color: '#64748b', fontSize: '0.82rem' }}>L2 Distance: {match.distance.toFixed(4)}</div>
-                    </div>
-                    <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
-                      <div>
-                        <strong style={{ color: '#64748b' }}>Uploaded Document:</strong>
-                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic' }}>"{match.sentence}"</p>
+                report.matchedSentences.map((match, idx) => {
+                  const isWebMatch = match.sourceDocumentId && match.sourceDocumentId.startsWith('http');
+                  return (
+                    <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <div style={{ fontWeight: 600, color: '#e11d48', fontSize: '0.875rem' }}>Sentence Match #{idx + 1}</div>
+                        <div style={{ fontWeight: 500, fontSize: '0.82rem' }}>
+                          {isWebMatch ? (
+                            <span style={{ color: '#059669', fontWeight: 600, backgroundColor: '#d1fae5', padding: '0.2rem 0.5rem', borderRadius: '0.25rem' }}>Live Web Match</span>
+                          ) : (
+                            <span style={{ color: '#64748b' }}>L2 Distance: {match.distance.toFixed(4)}</span>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
-                        <strong style={{ color: '#64748b' }}>Source Document (ID: {match.sourceDocumentId}):</strong>
-                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</p>
+                      <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
+                        <div>
+                          <strong style={{ color: '#64748b' }}>Uploaded Document:</strong>
+                          <p style={{ margin: '0.25rem 0', fontStyle: 'italic' }}>"{match.sentence}"</p>
+                        </div>
+                        <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
+                          <strong style={{ color: '#64748b' }}>Source:</strong>{' '}
+                          {isWebMatch ? (
+                            <a href={match.sourceDocumentId} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}>
+                              {match.sourceDocumentId}
+                            </a>
+                          ) : (
+                            <span>Local Document (ID: {match.sourceDocumentId})</span>
+                          )}
+                          <p style={{ margin: '0.25rem 0', fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
                   No semantic plagiarism was detected for this document. It is clean!
@@ -349,24 +365,40 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
 
             <div className="scrollable" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
               {data.document.plagiarismReport.matchedSentences && data.document.plagiarismReport.matchedSentences.length > 0 ? (
-                data.document.plagiarismReport.matchedSentences.map((match, idx) => (
-                  <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <div style={{ fontWeight: 600, color: '#e11d48', fontSize: '0.875rem' }}>Sentence Match #{idx + 1}</div>
-                      <div style={{ fontWeight: 500, color: '#64748b', fontSize: '0.82rem' }}>L2 Distance: {match.distance.toFixed(4)}</div>
-                    </div>
-                    <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
-                      <div>
-                        <strong style={{ color: '#64748b' }}>Uploaded Document:</strong>
-                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic' }}>"{match.sentence}"</p>
+                data.document.plagiarismReport.matchedSentences.map((match, idx) => {
+                  const isWebMatch = match.sourceDocumentId && match.sourceDocumentId.startsWith('http');
+                  return (
+                    <div key={idx} style={{ border: '1px solid #e2e8f0', borderRadius: '0.5rem', padding: '1rem', backgroundColor: '#f8fafc' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <div style={{ fontWeight: 600, color: '#e11d48', fontSize: '0.875rem' }}>Sentence Match #{idx + 1}</div>
+                        <div style={{ fontWeight: 500, fontSize: '0.82rem' }}>
+                          {isWebMatch ? (
+                            <span style={{ color: '#059669', fontWeight: 600, backgroundColor: '#d1fae5', padding: '0.2rem 0.5rem', borderRadius: '0.25rem' }}>Live Web Match</span>
+                          ) : (
+                            <span style={{ color: '#64748b' }}>L2 Distance: {match.distance.toFixed(4)}</span>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
-                        <strong style={{ color: '#64748b' }}>Source Document (ID: {match.sourceDocumentId}):</strong>
-                        <p style={{ margin: '0.25rem 0', fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</p>
+                      <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.875rem', color: '#334155' }}>
+                        <div>
+                          <strong style={{ color: '#64748b' }}>Uploaded Document:</strong>
+                          <p style={{ margin: '0.25rem 0', fontStyle: 'italic' }}>"{match.sentence}"</p>
+                        </div>
+                        <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
+                          <strong style={{ color: '#64748b' }}>Source:</strong>{' '}
+                          {isWebMatch ? (
+                            <a href={match.sourceDocumentId} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}>
+                              {match.sourceDocumentId}
+                            </a>
+                          ) : (
+                            <span>Local Document (ID: {match.sourceDocumentId})</span>
+                          )}
+                          <p style={{ margin: '0.25rem 0', fontStyle: 'italic', color: '#0f172a' }}>"{match.matchedSentence}"</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
                   No semantic plagiarism was detected for this document. It is clean!
