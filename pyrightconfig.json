@@ -1,6 +1,6 @@
 {
-  "venvPath": "ml-service",
-  "venv": "venv",
+  "venvPath": ".",
+  "venv": "ml-service/venv",
   "extraPaths": [
     "./ml-service"
   ]
