@@ -3,7 +3,7 @@ import hashlib
 import os
 import signal
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import chromadb
 import requests
@@ -109,6 +109,8 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
         if paragraphs is not None:
             document_paragraphs = paragraphs
         else:
+            if not isinstance(file_path, (str, os.PathLike)):
+                raise ValueError(f"Invalid or missing filePath: {file_path}")
             pdf_path = Path(file_path)
             if not pdf_path.exists():
                 raise FileNotFoundError(f"Uploaded file not found: {file_path}")
@@ -116,12 +118,11 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
             document_paragraphs = parse_pdf(pdf_bytes)
 
         vector_results = vectorizer_service.process_document(document_paragraphs)
-        cleaned_document_text = "\n".join(document_paragraphs)
-        suspect_sentences = []
-        if cleaned_document_text.strip():
-            suspect_sentences = extract_unique_sentences(cleaned_document_text, limit=3)
-
         vector_payload = build_vector_records(document_id, tenant_id, vector_results)
+
+        suspect_sentences = []
+        if vector_payload["documents"]:
+            suspect_sentences = extract_unique_sentences(vector_payload["documents"], limit=3)
         plagiarism_report = None
 
         if vector_payload["ids"]:
@@ -162,30 +163,40 @@ def process_job_sync(job_data: Dict[str, Any]) -> Dict[str, Any]:
                 unique_sources = set()
                 threshold = 0.35 # L2 distance threshold (~82.5% similarity)
 
-                ids_list = query_results.get("ids", [])
-                distances_list = query_results.get("distances", [])
-                metadatas_list = query_results.get("metadatas", [])
-                documents_list = query_results.get("documents", [])
+                ids_list = query_results.get("ids") or []
+                distances_list = query_results.get("distances") or []
+                metadatas_list = query_results.get("metadatas") or []
+                documents_list = query_results.get("documents") or []
 
                 for idx, sentence in enumerate(vector_payload["documents"]):
-                    if idx < len(distances_list) and distances_list[idx]:
+                    if idx < len(distances_list) and distances_list[idx] is not None:
                         distance = distances_list[idx][0]
-                        metadata = metadatas_list[idx][0]
-                        matched_doc = documents_list[idx][0]
+                        metadata = metadatas_list[idx][0] if idx < len(metadatas_list) and metadatas_list[idx] else None
+                        matched_doc = documents_list[idx][0] if idx < len(documents_list) and documents_list[idx] else None
 
-                        # Exclude self-matches (safeguard)
-                        if metadata.get("document_id") == document_id:
-                            continue
+                        if metadata is not None and matched_doc is not None:
+                            doc_id = metadata.get("document_id")
+                            chunk_index_val = metadata.get("chunk_index")
 
-                        if distance <= threshold:
-                            matched_sentences.append({
-                                "sentence": sentence,
-                                "matchedSentence": matched_doc,
-                                "distance": float(distance),
-                                "sourceDocumentId": metadata.get("document_id"),
-                                "sourceChunkIndex": int(metadata.get("chunk_index"))
-                            })
-                            unique_sources.add(metadata.get("document_id"))
+                            # Exclude self-matches (safeguard)
+                            if doc_id == document_id:
+                                continue
+
+                            if distance <= threshold:
+                                try:
+                                    chunk_idx = int(chunk_index_val) if isinstance(chunk_index_val, (int, str, float)) else 0
+                                except (ValueError, TypeError):
+                                    chunk_idx = 0
+
+                                matched_sentences.append({
+                                    "sentence": sentence,
+                                    "matchedSentence": matched_doc,
+                                    "distance": float(distance),
+                                    "sourceDocumentId": str(doc_id) if doc_id is not None else "",
+                                    "sourceChunkIndex": chunk_idx
+                                })
+                                if doc_id is not None:
+                                    unique_sources.add(str(doc_id))
 
                 # 3. Combine web matches and local matches
                 for match in web_matched_sentences:
@@ -253,7 +264,7 @@ async def main() -> None:
     vectorizer_service.load_model()
 
     shutdown_event = asyncio.Event()
-    worker = Worker(QUEUE_NAME, process_job, {
+    worker = Worker(QUEUE_NAME, cast(Any, process_job), {
         "connection": REDIS_URL,
         "lockDuration": 300000,
         "concurrency": 1
