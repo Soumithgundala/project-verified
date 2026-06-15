@@ -385,7 +385,7 @@ router.post('/audit-document', handleDocumentUpload, async (req, res) => {
 
     // Poll for plagiarism report completion
     let plagiarismReport = null;
-    const maxPollAttempts = 60; // 30 seconds max
+    const maxPollAttempts = 200; // 100 seconds max
     for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 500));
       const docStatus = getDocumentIngestion(uploadId, tenantId);
