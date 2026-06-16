@@ -249,6 +249,10 @@ const GitPulsePdfReport = ({ data, linkedUrl, isAuthentic, isPrinting }) => {
               <p className="pdf-stat-label">Dominance</p>
               <p className="pdf-evidence-metric">{evidenceReport.dominanceScore}%</p>
             </div>
+            <div>
+              <p className="pdf-stat-label">Fingerprints</p>
+              <p className="pdf-evidence-metric">{evidenceReport.fingerprintCount}</p>
+            </div>
           </div>
           <div className="pdf-diagnostic-note">
             <h3>Evidence Gate</h3>
