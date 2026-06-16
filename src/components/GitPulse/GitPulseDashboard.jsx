@@ -248,7 +248,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                 </span>
               </div>
             </div>
-            
+
             {data.semanticSubstitutionViolation && (
               <div className="semantic-substitution-violation-alert">
                 <ShieldAlert size={20} className="violation-icon" />
@@ -340,7 +340,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
             </div>
           </div>
         )}
- 
+
         {/* --- DOCUMENT PLAGIARISM REPORT --- */}
         {data.document?.plagiarismReport && (
           <div className="card matrix-card" style={{ borderTopColor: '#e11d48' }}>
@@ -630,6 +630,7 @@ const GitPulseDashboard = ({ data, setData, isModalView, isAuthentic }) => {
                   <div><span style={{ color: '#64748b' }}>Classification:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.plagiarismType === 'CLEAN_ORIGINAL_CODE' ? 'CLEAN_ORIGINAL_CODE' : data.evidenceReport.plagiarismType}</span></div>
                   <div><span style={{ color: '#64748b' }}>Containment:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.projectContainment}%</span></div>
                   <div><span style={{ color: '#64748b' }}>Dominance:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.dominanceScore}%</span></div>
+                  <div><span style={{ color: '#64748b' }}>Fingerprints:</span> <span style={{ fontWeight: 600 }}>{data.evidenceReport.fingerprintCount}</span></div>
                 </div>
               </div>
               <div style={{ padding: '0.875rem 1rem', borderRadius: '0.75rem', background: hasParseDegradation ? '#fff7ed' : '#f8fafc', border: `1px solid ${hasParseDegradation ? '#fdba74' : '#e2e8f0'}` }}>
