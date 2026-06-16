@@ -1,6 +1,5 @@
 {
-  "venvPath": ".",
-  "venv": "ml-service/venv",
+  "pythonPath": "./ml-service/venv/Scripts/python.exe",
   "extraPaths": [
     "./ml-service"
   ]
