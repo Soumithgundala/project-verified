@@ -286,6 +286,8 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
         plagiarismType: 'NONE',
         totalMatchedFingerprints: 0,
         minimumEvidenceThreshold: 0,
+        totalStudentFingerprints: 0,
+        fingerprintCount: 0,
         calibration: CALIBRATION,
         sources: [],
         suppressedSources: []
@@ -294,6 +296,8 @@ export function buildProjectReport(studentFingerprints, matchesByDoc, documentsM
     if (!studentFingerprints || studentFingerprints.length === 0) return result;
     const totalStudentFingerprints = studentFingerprints.length;
     result.minimumEvidenceThreshold = getMinimumMatchedFingerprints(totalStudentFingerprints);
+    result.totalStudentFingerprints = totalStudentFingerprints;
+    result.fingerprintCount = totalStudentFingerprints;
 
     let candidateSources = [];
     let totalRankedContainment = 0;
